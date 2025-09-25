@@ -45,3 +45,4 @@ entry("uptime");
 entry("getnice");
 entry("setnice");
 entry("ps");
+entry("meminfo");

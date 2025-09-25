@@ -1,27 +1,31 @@
-#include "../kernel/types.h" // <-- types.h를 가장 먼저 포함하여 'uint'를 정의합니다.
-#include "user.h"           // <-- 그 다음 user.h를 포함하여 uint를 사용하는 함수 선언을 처리합니다.
-// #include "../kernel/stat.h" // 불필요하여 제거
+#include "../kernel/types.h" // uint 타입 정의를 위해 필요합니다.
+#include "user.h"           // printf, meminfo, exit 함수 선언을 위해 필요합니다.
 
-int main()
-{
-    int i, nice;
-    for(i=1;i<11;i++){
-        // 이 부분은 printf 인자 에러가 이미 사라졌음을 가정하고 이전 코드를 유지합니다.
-        printf("%d : ", i);
-	nice = getnice(i);
-        if(nice == -1) {
-            printf("Wrong PID\n");
-        } else {
-	 	printf("\n");	
-	       	ps(i);
-		printf("\n");
-	    // getnice가 성공했을 때 출력할 내용이 필요하면 여기에 추가 (선택 사항)
-        }
-        printf("\n");
-    }
-
-    ps(0);
+int main(void) {
+    int free_memory_bytes;
     
-    // exit()에 인수 1개를 넣어주어야 합니다!
-    exit(0); // <-- 'user/user.h'의 선언(int exit(int))에 맞게 수정
+    // meminfo 시스템 콜을 호출하여 사용 가능한 메모리 크기(바이트)를 가져옵니다.
+    free_memory_bytes = meminfo();
+
+    if (free_memory_bytes < 0) {
+        // 시스템 콜 실패 시 (보통 -1 반환)
+        printf("Error: meminfo system call failed.\n");
+        exit(0);
+    }
+    
+    // 결과 출력 (xv6의 printf는 파일 디스크립터 1을 첫 번째 인수로 받습니다.)
+    printf("Available free memory: %d bytes\n", free_memory_bytes);
+
+    // 추가 테스트: 메모리 사용 전후 비교 (선택 사항)
+    
+    int *p = (int*)malloc(10 * 4096); // 10 페이지 할당
+    if (p) {
+        int after_alloc = meminfo();
+        printf("Memory after allocation: %d bytes (Difference: %d bytes)\n", 
+               after_alloc, free_memory_bytes - after_alloc);
+        free(p);
+    }
+    
+
+    exit(0);
 }

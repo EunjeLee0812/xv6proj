@@ -132,3 +132,9 @@ sys_ps(void)
 	ps(pid);
 	return 0;
 }
+
+uint64
+sys_meminfo(void)
+{
+	return meminfo();
+}

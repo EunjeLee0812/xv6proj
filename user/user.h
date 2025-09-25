@@ -27,6 +27,7 @@ int uptime(void);
 int getnice(int);
 int setnice(int, int);
 int ps(int);
+int meminfo(void);
 
 // ulib.c
 int stat(const char*, struct stat*);

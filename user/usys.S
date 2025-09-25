@@ -120,3 +120,8 @@ ps:
  li a7, SYS_ps
  ecall
  ret
+.global meminfo
+meminfo:
+ li a7, SYS_meminfo
+ ecall
+ ret

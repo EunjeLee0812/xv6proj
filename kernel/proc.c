@@ -799,3 +799,14 @@ void ps(int pid){
         }
 	return;
 }
+
+int meminfo(void)
+{
+	uint64 free_pages;
+	uint64 total_bytes;
+
+	free_pages = countfree();
+
+	total_bytes = free_pages * PGSIZE;
+	return total_bytes;
+}

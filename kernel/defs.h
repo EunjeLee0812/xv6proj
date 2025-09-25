@@ -59,6 +59,7 @@ void            ireclaim(int);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+uint64		countfree(void);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -104,6 +105,7 @@ void            procdump(void);
 int		getnice(int);
 int		setnice(int pid, int value);
 void		ps(int);
+int		meminfo(void);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
