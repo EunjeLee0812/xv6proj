@@ -114,3 +114,13 @@ sys_getnice(void)
 	argint(0, &pid);
 	return getnice(pid);
 }
+
+uint64
+sys_setnice(void)
+{
+	int pid, value;
+	argint(0, &pid);
+	argint(1, &value);
+	return setnice(pid, value);
+}
+

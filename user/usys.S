@@ -110,3 +110,8 @@ getnice:
  li a7, SYS_getnice
  ecall
  ret
+.global setnice
+setnice:
+ li a7, SYS_setnice
+ ecall
+ ret

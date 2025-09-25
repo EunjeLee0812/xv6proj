@@ -11,8 +11,10 @@ int main()
         int nice = getnice(i);
         if(nice == -1) {
             printf("Wrong PID\n");
-        } else {
-            printf("nice -> %d",nice);
+        } else {       
+	       	setnice(i, i);
+       		int nice = getnice(i);
+            	printf("nice -> %d",nice);
 	    // getnice가 성공했을 때 출력할 내용이 필요하면 여기에 추가 (선택 사항)
         }
         printf("\n");

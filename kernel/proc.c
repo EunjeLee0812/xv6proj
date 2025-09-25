@@ -702,3 +702,20 @@ getnice(int pid)
     }
     return -1;
 }
+
+int
+setnice(int pid, int value)
+{
+	struct proc *p;
+
+	for(p=proc;p<&proc[NPROC];p++){
+		acquire(&p->lock);
+		if(p->pid == pid){
+			p->nice = value;
+			release(&p->lock);
+			return 0;
+		}
+		release(&p->lock);
+	}
+	return -1;
+}
