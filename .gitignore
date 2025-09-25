@@ -1,18 +1,21 @@
-*~
-_*
+# 컴파일 결과물
 *.o
 *.d
-*.asm
 *.sym
-*.img
-vectors.S
-bootblock
-entryother
+
+# 빌드된 바이너리 파일
+kernel
 initcode
-initcode.out
-kernelmemfs
-mkfs
-kernel/kernel
-user/usys.S
-.gdbinit
-TAGS
+user/_*
+user/*.asm
+user/*.d
+user/*.o
+user/*.sym
+
+# 디스크 이미지
+fs.img
+
+# 에디터/시스템 생성 파일
+*~
+.#*
+.DS_Store

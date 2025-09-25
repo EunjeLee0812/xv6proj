@@ -124,7 +124,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
+  p->nice = 20;
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -684,4 +684,21 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int
+getnice(int pid)
+{
+    struct proc *p;
+    int nice;
+    for(p=proc;p<&proc[NPROC];p++){
+        acquire(&p->lock);
+        if(p->pid == pid){
+            nice = p->nice;
+            release(&p->lock);
+            return nice;
+        }
+        release(&p->lock);
+    }
+    return -1;
 }
