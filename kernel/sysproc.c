@@ -124,3 +124,11 @@ sys_setnice(void)
 	return setnice(pid, value);
 }
 
+uint64
+sys_ps(void)
+{
+	int pid;
+	argint(0, &pid);
+	ps(pid);
+	return 0;
+}

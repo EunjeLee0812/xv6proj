@@ -4,21 +4,23 @@
 
 int main()
 {
-    int i;
+    int i, nice;
     for(i=1;i<11;i++){
         // 이 부분은 printf 인자 에러가 이미 사라졌음을 가정하고 이전 코드를 유지합니다.
         printf("%d : ", i);
-        int nice = getnice(i);
+	nice = getnice(i);
         if(nice == -1) {
             printf("Wrong PID\n");
-        } else {       
-	       	setnice(i, i);
-       		int nice = getnice(i);
-            	printf("nice -> %d",nice);
+        } else {
+	 	printf("\n");	
+	       	ps(i);
+		printf("\n");
 	    // getnice가 성공했을 때 출력할 내용이 필요하면 여기에 추가 (선택 사항)
         }
         printf("\n");
     }
+
+    ps(0);
     
     // exit()에 인수 1개를 넣어주어야 합니다!
     exit(0); // <-- 'user/user.h'의 선언(int exit(int))에 맞게 수정

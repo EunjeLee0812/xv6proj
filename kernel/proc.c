@@ -6,6 +6,8 @@
 #include "proc.h"
 #include "defs.h"
 
+#define MAX_NAME_LEN 16
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -718,4 +720,82 @@ setnice(int pid, int value)
 		release(&p->lock);
 	}
 	return -1;
+}
+int numlen(int n) {
+    if (n == 0) return 1;
+    int len = 0;
+    if (n < 0) n = -n; 
+    while (n > 0) {
+        n /= 10;
+        len++;
+    }
+    return len;
+}
+void print_spaces(int count) {
+    for(int i = 0; i < count; i++) {
+        printf(" ");
+    }
+}
+
+
+void printp(struct proc *p) {
+    // 1. 상태 문자열 설정 및 출력
+    char *state_str = "???";
+    switch(p->state){
+        case SLEEPING: state_str = "SLEEPING"; break;
+        case RUNNABLE: state_str = "RUNNABLE"; break;
+        case RUNNING:  state_str = "RUNNING";  break;
+        case USED:     state_str = "USED";     break;
+        case ZOMBIE:   state_str = "ZOMBIE";   break;
+        default: break;
+    }
+
+    // 2. [NAME] 출력 및 공백 채우기 (MAX_NAME_LEN + 5칸 확보)
+    int name_len = strlen(p->name);
+    printf("%s", p->name);
+    print_spaces(9 - name_len); // 이름 최대 16 + pid 앞 5칸 공백 확보
+
+    // 3. [PID] 출력 및 공백 채우기 (5칸 확보)
+    int pid_len = numlen(p->pid);
+    printf("%d", p->pid);
+    print_spaces(8 - pid_len); // state 앞 5칸 공백 확보
+
+    // 4. [STATE] 출력 및 공백 채우기 (5칸 확보)
+    int state_len = strlen(state_str);
+    printf("%s", state_str);
+    print_spaces(15 - state_len); // priority 앞 8칸 공백 확보
+
+    // 5. [PRIORITY (NICE)] 출력 및 공백 채우기 (8칸 확보)
+    int nice_len = numlen(p->nice);
+    printf("%d", p->nice);
+    print_spaces(8 - nice_len); // 줄 끝까지 남은 8칸 공백 확보 (필요한 경우)
+
+    // 6. 개행 문자 출력
+    printf("\n");
+}
+void ps(int pid){
+        struct proc *p;
+        if(pid == 0){
+                printf("name     pid     state          priority\n"); 
+		for(p=proc;p<&proc[NPROC];p++){
+			acquire(&p->lock);
+                        if(p->state != UNUSED && p->state != ZOMBIE){
+                                printp(p);
+                        }
+			release(&p->lock);
+                }
+		return;
+        }
+
+        for(p=proc;p<&proc[NPROC];p++){
+		acquire(&p->lock);
+                if(p->pid == pid){
+                        printf("name     pid     state          priority\n"); 
+			printp(p);
+			release(&p->lock);
+                        return;
+                }
+		release(&p->lock);
+        }
+	return;
 }

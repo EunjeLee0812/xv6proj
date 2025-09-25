@@ -115,3 +115,8 @@ setnice:
  li a7, SYS_setnice
  ecall
  ret
+.global ps
+ps:
+ li a7, SYS_ps
+ ecall
+ ret
