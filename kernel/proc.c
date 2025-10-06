@@ -807,14 +807,47 @@ void printp(struct proc *p) {
     int nice_len = numlen(p->nice);
     printf("%d", p->nice);
     print_spaces(8 - nice_len); // 줄 끝까지 남은 8칸 공백 확보 (필요한 경우)
+    
+    // 5. [runtime/weight] 출력 (열 너비: 15)
+    uint64 rt_weight = p->runtime / p->weight; // 정수 연산
+    int rt_weight_len = numlen(rt_weight);
+    printf("%lu", rt_weight);
+    print_spaces(15 - rt_weight_len); 
 
+    // 6. [runtime] 출력 (열 너비: 9)
+    int runtime_len = numlen(p->runtime);
+    printf("%lu", p->runtime); 
+    print_spaces(9 - runtime_len); 
+
+    // 7. [vruntime] 출력 (열 너비: 11)
+    int vruntime_len = numlen(p->vruntime);
+    printf("%lu", p->vruntime); 
+    print_spaces(11 - vruntime_len); 
+
+    // 8. [vdeadline] 출력 (열 너비: 11)
+    int vdeadline_len = numlen(p->vdeadline);
+    printf("%lu", p->vdeadline); 
+    print_spaces(11 - vdeadline_len); 
+    
+    // 9. [is_eligible] 출력 (열 너비: 12)
+    char *eligible_str = (p->is_eligible == 1) ? "true" : "false";
+    int eligible_len = strlen(eligible_str);
+    printf("%s", eligible_str);
+    print_spaces(12 - eligible_len);
+
+    // 10. [tick] 출력 (열 너비: 10)
+    extern uint64 ticks;
+    int tick_len = numlen(ticks);
+    printf("%lu", ticks); 
+
+    // 마지막 열이므로 공백 불필요 (개행 문자만 출력)
     // 6. 개행 문자 출력
     printf("\n");
 }
 void ps(int pid){
         struct proc *p;
         if(pid == 0){
-                printf("name     pid     state          priority\n"); 
+                printf("name     pid     state          priority  runtime/weight  runtime  vruntime  vdeadline  is_eligible  tick\n"); 
 		for(p=proc;p<&proc[NPROC];p++){
 			acquire(&p->lock);
                         if(p->state != UNUSED && p->state != ZOMBIE){
@@ -828,7 +861,7 @@ void ps(int pid){
         for(p=proc;p<&proc[NPROC];p++){
 		acquire(&p->lock);
                 if(p->pid == pid){
-                        printf("name     pid     state          priority\n"); 
+                        printf("name     pid     state          priority  runtime/weight  runtime  vruntime  vdeadline  is_eligible  tick\n"); 
 			printp(p);
 			release(&p->lock);
                         return;
