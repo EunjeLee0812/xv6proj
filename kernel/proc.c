@@ -345,18 +345,14 @@ kexit(int status)
   p->cwd = 0;
 
   acquire(&wait_lock);
-
+  acquire(&p->lock);
   // Give any children to init.
   reparent(p);
-
   // Parent might be sleeping in wait().
-  wakeup(p->parent);
-  
-  acquire(&p->lock);
-
   p->xstate = status;
   p->state = ZOMBIE;
-
+  wakeup(p->parent);
+  wakeup(p);
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
@@ -809,4 +805,33 @@ int meminfo(void)
 
 	total_bytes = free_pages * PGSIZE;
 	return total_bytes;
+}
+
+int waitpid(int pid){
+	int found_process;
+	struct proc *pp, *target_proc = 0;
+	acquire(&wait_lock);
+	while(1){
+		found_process = 0;
+		for(pp=proc;pp<&proc[NPROC];pp++){
+			if(pp->pid == pid){
+				found_process = 1;
+				target_proc = pp;
+				acquire(&pp->lock);
+				if(pp->state == ZOMBIE){
+					freeproc(pp);
+					release(&pp->lock);
+					release(&wait_lock);
+					return 0;
+				}
+				release(&pp->lock);
+				break;
+			}
+		}
+		if(found_process == 0){
+			release(&wait_lock);
+			return -1;
+		}
+		sleep(target_proc, &wait_lock);
+	}
 }

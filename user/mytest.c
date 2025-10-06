@@ -1,31 +1,89 @@
-#include "../kernel/types.h" // uint 타입 정의를 위해 필요합니다.
-#include "user.h"           // printf, meminfo, exit 함수 선언을 위해 필요합니다.
+#include "../kernel/types.h"
+#include "user.h"
 
-int main(void) {
-    int free_memory_bytes;
+// 목표: P3 -> P4 -> P5 생성 후, P4는 P5를 기다리고, P3는 P4를 기다립니다.
+
+void child_two_logic(void) {
+    // Child 2 (PID 5)의 로직
+    printf("Child 2 (PID %d): Process created. Working for 20 ticks.\n", getpid());
+    printf("Child 2 (PID %d): Work finished. Exiting now.\n", getpid());
+    exit(0);
+}
+
+void child_one_logic(int parent_pid) {
+    // Child 1 (PID 4)의 로직
+    int child_two_pid;
+    int wait_result;
     
-    // meminfo 시스템 콜을 호출하여 사용 가능한 메모리 크기(바이트)를 가져옵니다.
-    free_memory_bytes = meminfo();
+    printf("Child 1 (PID %d): Created by Parent %d. Now forking Child 2...\n", getpid(), parent_pid);
+    
+    // 1. Child 2 (PID 5) 생성
+    child_two_pid = fork();
+    
+    if (child_two_pid < 0) {
+        printf("Error: Child 1 fork failed.\n");
+        exit(0);
+    } else if (child_two_pid == 0) {
+        // Child 2 프로세스 (PID 5)
+        child_two_logic();
+        // Child 2가 종료되면 다음 라인은 실행되지 않음
+    } else {
+        // Child 1 (PID 4)
+        
+        // 2. waitpid(5) 호출
+        wait_result = waitpid(child_two_pid);
 
-    if (free_memory_bytes < 0) {
-        // 시스템 콜 실패 시 (보통 -1 반환)
-        printf("Error: meminfo system call failed.\n");
+        // 3. Child 2의 종료 확인
+        if (wait_result == 0) {
+            printf("Child 1 (PID %d): Child 2 (PID %d) exited successfully. Exiting now.\n", getpid(), child_two_pid);
+        } else {
+            printf("Child 1 (PID %d): waitpid error for PID %d. Exiting now.\n", getpid(), child_two_pid);
+        }
         exit(0);
     }
-    
-    // 결과 출력 (xv6의 printf는 파일 디스크립터 1을 첫 번째 인수로 받습니다.)
-    printf("Available free memory: %d bytes\n", free_memory_bytes);
+}
 
-    // 추가 테스트: 메모리 사용 전후 비교 (선택 사항)
+int main(void) {
+    int child_one_pid;
+    int wait_result;
+    int parent_pid = getpid();
     
-    int *p = (int*)malloc(10 * 4096); // 10 페이지 할당
-    if (p) {
-        int after_alloc = meminfo();
-        printf("Memory after allocation: %d bytes (Difference: %d bytes)\n", 
-               after_alloc, free_memory_bytes - after_alloc);
-        free(p);
+    printf("--------------------------------\n");
+    printf("Parent (PID %d): Starting Cascading waitpid test.\n", parent_pid);
+
+    // 1. Child 1 (PID 4) 생성
+    child_one_pid = fork();
+
+    if (child_one_pid < 0) {
+        printf("Error: Parent fork failed.\n");
+        exit(0);
+    } 
+    
+    // ------------------------------------
+    // [Child 1 Process (PID 4)]
+    // ------------------------------------
+    else if (child_one_pid == 0) {
+        child_one_logic(parent_pid);
+        // Child 1이 종료되면 다음 라인은 실행되지 않음
+    } 
+    
+    // ------------------------------------
+    // [Parent Process (PID 3)]
+    // ------------------------------------
+    else {
+        // 2. waitpid(4) 호출
+        wait_result = waitpid(child_one_pid); 
+
+        // 3. Child 1의 종료 확인
+        printf("Parent (PID %d): waitpid completed. Return Value: %d\n", parent_pid, wait_result);
+
+        if (wait_result == 0) {
+            printf("Parent (PID %d): Child 1 (PID %d) exited successfully. Test finished.\n", parent_pid, child_one_pid);
+        } else {
+            printf("Parent (PID %d): waitpid error for PID %d. Test finished.\n", parent_pid, child_one_pid);
+        }
     }
-    
 
+    printf("--------------------------------\n");
     exit(0);
 }

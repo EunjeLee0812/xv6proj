@@ -106,6 +106,7 @@ int		getnice(int);
 int		setnice(int pid, int value);
 void		ps(int);
 int		meminfo(void);
+int		waitpid(int);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
