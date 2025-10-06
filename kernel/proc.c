@@ -427,6 +427,10 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  //scheduler 수정한부분 #1
+  struct proc *next_proc = 0;
+  uint64 min_vdeadline = (uint64)-1;
+  //수정끝
 
   c->proc = 0;
   for(;;){
@@ -445,16 +449,48 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+        
+	//vdeadline 검사 브랜치 추가      
+	if(p->vdeadline <min_vdeadline){
+	    if(next_proc != 0) release(&next_proc->lock);
+	  
+	  min_vdeadline = p->vdeadline;
+	  next_proc = p;
+
+	}
+	else{
+	  release(&p->lock);
+	}
+      else release(&p->lock);
+	//추가 끝
+	
+//  	  p->state = RUNNING;
+//        c->proc = p;
+//        swtch(&c->context, &p->context);
+//        RR일 때 있던 코드.
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+//        c->proc = 0;
+//        found = 1;
+//        여기도 RR일 때 있던 코드
       }
-      release(&p->lock);
+//    release(&p->lock)
+//    RR일때 있던 release
+
+      if(next_proc != 0){
+        //eligible 검사 추가해야함.
+	next_proc->state = RUNNING;
+	c->proc = next_proc;
+	found = 1;
+
+	swtch(&c->context, &next_proc->context);
+
+	c->proc=0;
+
+	acquire(&next_proc->lock);
+	release(&next_proc->lock);
+      }
     }
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.
