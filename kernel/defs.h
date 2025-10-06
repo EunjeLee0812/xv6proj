@@ -189,3 +189,7 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+//Lag Value
+uint64 v0;
+uint64 total_weight;

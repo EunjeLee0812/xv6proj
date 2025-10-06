@@ -127,6 +127,12 @@ found:
   p->pid = allocpid();
   p->state = USED;
   p->nice = 20;
+  p->weight = 1024;
+  p->runtime = 0;
+  //vrutime
+  p->timeslice = 5;
+  //p->vdeadlie
+  
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
