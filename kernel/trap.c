@@ -34,6 +34,17 @@ trapinithart(void)
 // called from, and returns to, trampoline.S
 // return value is user satp for trampoline.S to switch to.
 //
+
+//새로 추가한 함수
+void update_vdeadline(struct proc *p){
+  #define BASE_TIMESLICE 5
+  uint64 weighted_timeslice = (BASE_TIMESLICE * WEIGHT_NICE_20)/p->weight;
+  p->vdeadline = p->vruntime + weighted_timeslice;
+  p->timeslice = BASE_TIMESLICE;
+}
+//새로 추가한 함수 끝
+//
+
 uint64
 usertrap(void)
 {
@@ -81,8 +92,19 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2){
+     //수정한 부분 시작
+    uint64 delta_runtime = 1;
+    p->runtime += delta_runtime;
+    uint64 weighted_delta_vruntime = (WEIGHT_NICE_20 * delta_runtime)/p->weight;
+    p->vruntime += weighted_delta_vruntime;
+    p->timeslice -= 1;
+    //수정 끝
+    if(p->timeslice<=0){
+      update_vdeadline(p);
+      yield();
+    }
+  }
 
   prepare_return();
 
