@@ -105,4 +105,9 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debu
   int nice;
+  uint64 vruntime;
+  uint64 vdeadline;
+  uint64 runtime;
+  uint weight;
+  int timeslice;
 };
