@@ -104,6 +104,14 @@ allocpid()
   return pid;
 }
 
+//vdeadline계산
+void update_vdeadline(struct proc *p){
+  uint64 weighted_timeslice = (5*WEIGHT_NICE_20)/p->weight;
+
+  p->vdeadline = p->runtime + weighted_timescale;
+  p->timeslice = 5;
+}
+
 // Look in the process table for an UNUSED proc.
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
@@ -124,14 +132,20 @@ allocproc(void)
   return 0;
 
 found:
+  struct proc *parent = myproc();
+  if(parent){
+    p->vruntime = parent->vruntime;
+    p->nice = parent->nice;
+  }
+  else{
+    p->vruntime = 0;
+    p->nice = 20;
   p->pid = allocpid();
   p->state = USED;
-  p->nice = 20;
   p->weight = 1024;
   p->runtime = 0;
-  //vrutime
   p->timeslice = 5;
-  //p->vdeadlie
+  update_vdeadline(p);
   
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -617,6 +631,7 @@ wakeup(void *chan)
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
         p->state = RUNNABLE;
+	update_vdeadline(p);
       }
       release(&p->lock);
     }
