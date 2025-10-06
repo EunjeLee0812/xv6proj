@@ -111,3 +111,5 @@ struct proc {
   uint weight;
   int timeslice;
 };
+
+#define WEIGHT_NICE_20 1024
