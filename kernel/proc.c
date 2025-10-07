@@ -150,6 +150,8 @@ allocproc(void)
   return 0;
 
 found:
+  p->pid = allocpid();
+  p->state = USED;
   struct proc *parent = myproc();
   if(parent){
     p->vruntime = parent->vruntime;
@@ -159,8 +161,6 @@ found:
     p->vruntime = 0;
     p->nice = 20;
   }
-  p->pid = allocpid();
-  p->state = USED;
   p->weight = 1024;
   p->runtime = 0;
   p->timeslice = 5;
@@ -520,6 +520,17 @@ scheduler(void)
       }
       else release(&p->lock);
     }
+    if(next_proc != 0){
+      next_proc->state = RUNNING;
+      c->proc = next_proc;
+      found = 1;
+
+      swtch(&c->context, &next_proc->context);
+
+      c->proc=0;
+      acquire(&next_proc->lock);
+      release(&next_proc->lock);
+    }
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.
       asm volatile("wfi");
@@ -586,7 +597,7 @@ forkret(void)
     first = 0;
     // ensure other cores see first=0.
     __sync_synchronize();
-
+    
     // We can invoke kexec() now that file system is initialized.
     // Put the return value (argc) of kexec into a0.
     p->trapframe->a0 = kexec("/init", (char *[]){ "/init", 0 });
@@ -594,7 +605,7 @@ forkret(void)
       panic("exec");
     }
   }
-
+  
   // return to user space, mimicing usertrap()'s return.
   prepare_return();
   uint64 satp = MAKE_SATP(p->pagetable);
