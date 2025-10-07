@@ -124,10 +124,10 @@ allocpid()
 
 //vdeadline계산
 void update_vdeadline(struct proc *p){
-  uint64 weighted_timeslice = (5*WEIGHT_NICE_20)/p->weight;
+  uint64 weighted_timeslice = (BASE_TIMESLICE*WEIGHT_NICE_20)/p->weight;
 
   p->vdeadline = p->runtime + weighted_timeslice;
-  p->timeslice = 5;
+  p->timeslice = BASE_TIMESLICE;
 }
 
 // Look in the process table for an UNUSED proc.
@@ -158,6 +158,7 @@ found:
   else{
     p->vruntime = 0;
     p->nice = 20;
+  }
   p->pid = allocpid();
   p->state = USED;
   p->weight = 1024;
@@ -780,6 +781,8 @@ setnice(int pid, int value)
 		acquire(&p->lock);
 		if(p->pid == pid){
 			p->nice = value;
+			p->weight = get_weight_from_nice(p->nice);
+			update_vdeadline(p);
 			release(&p->lock);
 			return 0;
 		}
@@ -787,10 +790,9 @@ setnice(int pid, int value)
 	}
 	return -1;
 }
-int numlen(int n) {
+int numlen(uint64 n) {
     if (n == 0) return 1;
-    int len = 0;
-    if (n < 0) n = -n; 
+    int len = 0; 
     while (n > 0) {
         n /= 10;
         len++;

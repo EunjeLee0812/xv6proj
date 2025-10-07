@@ -113,3 +113,4 @@ struct proc {
 };
 
 #define WEIGHT_NICE_20 1024
+#define BASE_TIMESLICE 5
