@@ -9,11 +9,11 @@
 // CPU를 점유하는 함수 (긴 계산 루프)
 void cpu_hog() {
     volatile int k = 0; // 최적화 방지
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 500; i++) {
         for (int j = 0; j < LONG_LOOP_COUNT; j++) {
             k++;
         }
-	if(i==25) ps(0);
+	if(i==400) ps(0);
     }
 }
 
@@ -22,7 +22,7 @@ main(int argc, char *argv[])
 {
     int pid;
     // 테스트 케이스: 최우선(0), 기본(20), 최하위(39)
-    int nice_values[] = {0, 20, 39}; 
+    int nice_values[] = {0, 10, 20}; 
     char *names[] = {"T_High", "T_Base", "T_Low"};
     int num_processes = sizeof(nice_values) / sizeof(nice_values[0]);
     int i;

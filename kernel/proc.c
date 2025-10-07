@@ -510,13 +510,14 @@ scheduler(void)
 	if(is_eligible){
           if(p->vdeadline < min_vdeadline){
 	    if(next_proc != 0) release(&next_proc->lock);
-	  next_proc = p;
-	  min_vdeadline = p->vdeadline;
-	  continue;
+	    next_proc = p;
+	    min_vdeadline = p->vdeadline;
 	  }
+	  else release(&p->lock);
 	}
+	else release(&p->lock);
       }
-      release(&p->lock);
+      else release(&p->lock);
     }
 
     if(next_proc != 0){
@@ -930,8 +931,8 @@ void ps(int pid)
             if (pid == 0 || p->pid == pid) {
 
                 int is_eligible_flag = 0;
-
-                if (p->state == RUNNABLE) {
+                if(p->state == RUNNING) is_eligible_flag = 1;
+		else if (p->state == RUNNABLE) {
                     if (total_weight > 0) {
                         uint64 v_offset = p->vruntime - min_vruntime;
                         uint64 right_term = v_offset * total_weight;
