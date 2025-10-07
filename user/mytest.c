@@ -1,89 +1,65 @@
 #include "../kernel/types.h"
+#include "../kernel/stat.h"
 #include "user.h"
+#include "../kernel/fcntl.h"
 
-// 목표: P3 -> P4 -> P5 생성 후, P4는 P5를 기다리고, P3는 P4를 기다립니다.
+// 총 CPU 점유 시간을 늘리기 위한 반복 횟수
+#define LONG_LOOP_COUNT 50000000 
 
-void child_two_logic(void) {
-    // Child 2 (PID 5)의 로직
-    printf("Child 2 (PID %d): Process created. Working for 20 ticks.\n", getpid());
-    printf("Child 2 (PID %d): Work finished. Exiting now.\n", getpid());
-    exit(0);
-}
-
-void child_one_logic(int parent_pid) {
-    // Child 1 (PID 4)의 로직
-    int child_two_pid;
-    int wait_result;
-    
-    printf("Child 1 (PID %d): Created by Parent %d. Now forking Child 2...\n", getpid(), parent_pid);
-    
-    // 1. Child 2 (PID 5) 생성
-    child_two_pid = fork();
-    
-    if (child_two_pid < 0) {
-        printf("Error: Child 1 fork failed.\n");
-        exit(0);
-    } else if (child_two_pid == 0) {
-        // Child 2 프로세스 (PID 5)
-        child_two_logic();
-        // Child 2가 종료되면 다음 라인은 실행되지 않음
-    } else {
-        // Child 1 (PID 4)
-        
-        // 2. waitpid(5) 호출
-        wait_result = waitpid(child_two_pid);
-
-        // 3. Child 2의 종료 확인
-        if (wait_result == 0) {
-            printf("Child 1 (PID %d): Child 2 (PID %d) exited successfully. Exiting now.\n", getpid(), child_two_pid);
-        } else {
-            printf("Child 1 (PID %d): waitpid error for PID %d. Exiting now.\n", getpid(), child_two_pid);
+// CPU를 점유하는 함수 (긴 계산 루프)
+void cpu_hog() {
+    volatile int k = 0; // 최적화 방지
+    for (int i = 0; i < 50; i++) {
+        for (int j = 0; j < LONG_LOOP_COUNT; j++) {
+            k++;
         }
-        exit(0);
     }
 }
 
-int main(void) {
-    int child_one_pid;
-    int wait_result;
-    int parent_pid = getpid();
-    
-    printf("--------------------------------\n");
-    printf("Parent (PID %d): Starting Cascading waitpid test.\n", parent_pid);
+void
+main(int argc, char *argv[])
+{
+    int pid;
+    // 테스트 케이스: 최우선(0), 기본(20), 최하위(39)
+    int nice_values[] = {0, 20, 39}; 
+    char *names[] = {"T_High", "T_Base", "T_Low"};
+    int num_processes = sizeof(nice_values) / sizeof(nice_values[0]);
+    int i;
 
-    // 1. Child 1 (PID 4) 생성
-    child_one_pid = fork();
+    printf("=== EE VDF Fairness Test START ===\n");
+    printf("Expected: T_High(nice=0) uses most CPU; T_Low(nice=39) vruntime increases fastest.\n");
 
-    if (child_one_pid < 0) {
-        printf("Error: Parent fork failed.\n");
-        exit(0);
-    } 
-    
-    // ------------------------------------
-    // [Child 1 Process (PID 4)]
-    // ------------------------------------
-    else if (child_one_pid == 0) {
-        child_one_logic(parent_pid);
-        // Child 1이 종료되면 다음 라인은 실행되지 않음
-    } 
-    
-    // ------------------------------------
-    // [Parent Process (PID 3)]
-    // ------------------------------------
-    else {
-        // 2. waitpid(4) 호출
-        wait_result = waitpid(child_one_pid); 
+    for (i = 0; i < num_processes; i++) {
+        pid = fork();
 
-        // 3. Child 1의 종료 확인
-        printf("Parent (PID %d): waitpid completed. Return Value: %d\n", parent_pid, wait_result);
+        if (pid < 0) {
+            fprintf(2, "mytest: fork failed\n");
+            break;
+        }
 
-        if (wait_result == 0) {
-            printf("Parent (PID %d): Child 1 (PID %d) exited successfully. Test finished.\n", parent_pid, child_one_pid);
-        } else {
-            printf("Parent (PID %d): waitpid error for PID %d. Test finished.\n", parent_pid, child_one_pid);
+        if (pid == 0) {
+            // 자식 프로세스
+            
+            // setnice 시스템 콜 호출 (이 시스템 콜이 구현되어 있어야 함)
+            if (setnice(getpid(), nice_values[i]) < 0) {
+                fprintf(2, "Test %s: setnice failed. Check setnice implementation.\n", names[i]);
+            }
+            
+            printf("Process %s (PID %d) starting with nice=%d...\n", 
+                   names[i], getpid(), nice_values[i]);
+            
+            cpu_hog(); // CPU 점유 시작
+
+            printf("Process %s (PID %d) finished.\n", names[i], getpid());
+            exit(0);
         }
     }
 
-    printf("--------------------------------\n");
+    // 부모 프로세스는 모든 자식이 끝날 때까지 대기
+    for (i = 0; i < num_processes; i++) {
+        wait(0);
+    }
+
+    printf("=== EE VDF Fairness Test END ===\n");
     exit(0);
 }

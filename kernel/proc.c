@@ -28,6 +28,24 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+#define NICE_COUNT 40
+const uint NICE_TO_WEIGHT[NICE_COUNT] = {
+    88761, 71743, 56483, 46273, 36291,
+    29154, 23254, 18705, 14949, 11916,
+    9548, 7629, 6108, 4906, 3906,
+    3121, 2501, 1991, 1586, 1277,
+    1024, 819, 655, 526, 423, //20start
+    335, 272, 215, 172, 137, 
+    110, 87, 70, 56, 45,
+    36, 29, 23, 18, 15
+};
+
+uint get_weight_from_nice(int nice){
+  if(nice<0) nice = 0;
+  else if(nice>=40) nice = 39;
+  return NICE_TO_WEIGHT[nice];
+}
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -108,7 +126,7 @@ allocpid()
 void update_vdeadline(struct proc *p){
   uint64 weighted_timeslice = (5*WEIGHT_NICE_20)/p->weight;
 
-  p->vdeadline = p->runtime + weighted_timescale;
+  p->vdeadline = p->runtime + weighted_timeslice;
   p->timeslice = 5;
 }
 
@@ -441,11 +459,8 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  //scheduler 수정한부분 #1
   struct proc *next_proc = 0;
   uint64 min_vdeadline = (uint64)-1;
-  //수정끝
-
   c->proc = 0;
   for(;;){
     // The most recent process to run may have had interrupts
@@ -453,58 +468,56 @@ scheduler(void)
     // processes are waiting. Then turn them back off
     // to avoid a possible race between an interrupt
     // and wfi.
+    uint64 min_vruntime = (uint64)-1;
+    uint64 total_weight = 0;
+    uint64 total_vruntime_offset_weight = 0;
     intr_on();
     intr_off();
-
     int found = 0;
+
+    for(p=proc;p<&proc[NPROC];p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE){
+        if(p->vruntime < min_vruntime){
+	  min_vruntime = p->vruntime;
+	}
+	total_weight += p->weight;
+      }
+      release(&p->lock);
+    }
+
+    for(p=proc;p<&proc[NPROC];p++){
+      acquire(&p->lock);
+      if(p->state==RUNNABLE){
+        uint64 v_offset = p->vruntime - min_vruntime;
+	total_vruntime_offset_weight += v_offset * p->weight;
+      }
+      release(&p->lock);
+    }
+
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
-        // before jumping back to us.
-        
-	//vdeadline 검사 브랜치 추가      
-	if(p->vdeadline <min_vdeadline){
+	if(p->vdeadline < min_vdeadline){
+	  uint64 v_offset = p->vruntime - min_vruntime;
+	  uint64 right_term = v_offset * total_weight;
+	  uint64 left_term = total_vruntime_offset_weight;
+	  int is_eligible = 0;
+	  if(total_weight > 0 && left_term >= right_term)
+	    is_eligible = 1;
+
+	  if(is_eligible){
+	    min_vdeadline = p->vdeadline;
 	    if(next_proc != 0) release(&next_proc->lock);
-	  
-	  min_vdeadline = p->vdeadline;
-	  next_proc = p;
-
+	    next_proc = p;
+	  }
+	  else release(&p->lock);
 	}
-	else{
-	  release(&p->lock);
-	}
+        else release(&p->lock);
+      }
       else release(&p->lock);
-	//추가 끝
-	
-//  	  p->state = RUNNING;
-//        c->proc = p;
-//        swtch(&c->context, &p->context);
-//        RR일 때 있던 코드.
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-//        c->proc = 0;
-//        found = 1;
-//        여기도 RR일 때 있던 코드
-      }
-//    release(&p->lock)
-//    RR일때 있던 release
-
-      if(next_proc != 0){
-        //eligible 검사 추가해야함.
-	next_proc->state = RUNNING;
-	c->proc = next_proc;
-	found = 1;
-
-	swtch(&c->context, &next_proc->context);
-
-	c->proc=0;
-
-	acquire(&next_proc->lock);
-	release(&next_proc->lock);
-      }
     }
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.
@@ -791,7 +804,7 @@ void print_spaces(int count) {
 }
 
 
-void printp(struct proc *p) {
+void printp(struct proc *p, int is_eligible) {
     // 1. 상태 문자열 설정 및 출력
     char *state_str = "???";
     switch(p->state){
@@ -845,45 +858,103 @@ void printp(struct proc *p) {
     print_spaces(11 - vdeadline_len); 
     
     // 9. [is_eligible] 출력 (열 너비: 12)
-    char *eligible_str = (p->is_eligible == 1) ? "true" : "false";
+    char *eligible_str = (is_eligible == 1) ? "true" : "false";
     int eligible_len = strlen(eligible_str);
     printf("%s", eligible_str);
     print_spaces(12 - eligible_len);
 
     // 10. [tick] 출력 (열 너비: 10)
-    extern uint64 ticks;
-    int tick_len = numlen(ticks);
-    printf("%lu", ticks); 
+    extern uint ticks;
+    printf("%u", ticks); 
 
     // 마지막 열이므로 공백 불필요 (개행 문자만 출력)
     // 6. 개행 문자 출력
     printf("\n");
 }
-void ps(int pid){
-        struct proc *p;
-        if(pid == 0){
-                printf("name     pid     state          priority  runtime/weight  runtime  vruntime  vdeadline  is_eligible  tick\n"); 
-		for(p=proc;p<&proc[NPROC];p++){
-			acquire(&p->lock);
-                        if(p->state != UNUSED && p->state != ZOMBIE){
-                                printp(p);
-                        }
-			release(&p->lock);
-                }
-		return;
-        }
 
-        for(p=proc;p<&proc[NPROC];p++){
-		acquire(&p->lock);
-                if(p->pid == pid){
-                        printf("name     pid     state          priority  runtime/weight  runtime  vruntime  vdeadline  is_eligible  tick\n"); 
-			printp(p);
-			release(&p->lock);
-                        return;
-                }
-		release(&p->lock);
+void ps(int pid)
+{
+    struct proc *p;
+
+    // EEVDF 계산 변수 선언 및 초기화
+    uint64 min_vruntime = (uint64)-1;
+    uint64 total_weight = 0;
+    uint64 total_vruntime_offset_weight = 0;
+
+    // =========================================================
+    // [1차 & 2차 루프: EEVDF 변수 계산 - PID에 관계없이 전체 RUNNABLE 기준]
+    // =========================================================
+    // 1. v0 (min_vruntime) 및 total_weight 계산
+    for(p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+        if(p->state == RUNNABLE) {
+            if (p->vruntime < min_vruntime) {
+                min_vruntime = p->vruntime;
+            }
+            total_weight += p->weight;
         }
-	return;
+        release(&p->lock);
+    }
+
+    // 2. total_vruntime_offset_weight 계산 (v0 확정 후)
+    if (total_weight > 0) {
+        for(p = proc; p < &proc[NPROC]; p++) {
+            acquire(&p->lock);
+            if(p->state == RUNNABLE) {
+                uint64 v_offset = p->vruntime - min_vruntime;
+                total_vruntime_offset_weight += v_offset * p->weight;
+            }
+            release(&p->lock);
+        }
+    }
+
+    // =========================================================
+    // [3차 루프: 출력 및 Eligibility 계산]
+    // =========================================================
+
+    // 출력 헤더
+    printf("name    pid    state          priority  rt/weight  runtime   vruntime  vdeadline  eligible  tick\n");
+
+    for(p=proc;p<&proc[NPROC];p++){
+        acquire(&p->lock);
+
+        // 출력 대상 필터링: UNUSED/ZOMBIE가 아니고, 요청된 PID와 일치해야 함
+        if(p->state != UNUSED && p->state != ZOMBIE){
+
+            // PID가 0 (전체 출력)이거나, 요청된 PID와 일치하는 경우
+            if (pid == 0 || p->pid == pid) {
+
+                int is_eligible_flag = 0;
+
+                if (p->state == RUNNABLE) {
+                    if (total_weight > 0) {
+                        uint64 v_offset = p->vruntime - min_vruntime;
+                        uint64 right_term = v_offset * total_weight;
+                        uint64 left_term = total_vruntime_offset_weight;
+
+                        // Eligibility 검사: Lag_i >= 0 조건
+                        if (left_term >= right_term) {
+                            is_eligible_flag = 1; // Eligible
+                        }
+                    } else if (p->weight > 0) {
+                        // 유일한 RUNNABLE 프로세스일 경우
+                        is_eligible_flag = 1;
+                    }
+                }
+
+                // printp 호출 (is_eligible_flag 전달)
+                printp(p, is_eligible_flag);
+
+                if (p->pid == pid && pid != 0) {
+                    release(&p->lock);
+                    return; // 특정 PID를 찾았으면 바로 종료
+                }
+            }
+        }
+        release(&p->lock);
+    }
+
+    return;
 }
 
 int meminfo(void)
