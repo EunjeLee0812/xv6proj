@@ -161,7 +161,7 @@ found:
     p->vruntime = 0;
     p->nice = 20;
   }
-  p->weight = 1024;
+  p->weight = get_weight_from_nice(p->nice);
   p->runtime = 0;
   p->timeslice = 5;
   update_vdeadline(p);

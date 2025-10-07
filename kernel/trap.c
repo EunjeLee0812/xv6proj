@@ -16,6 +16,7 @@ void kernelvec();
 
 extern int devintr();
 
+extern void update_vdeadline(struct proc *p);
 void
 trapinit(void)
 {
@@ -35,15 +36,6 @@ trapinithart(void)
 // return value is user satp for trampoline.S to switch to.
 //
 
-//새로 추가한 함수
-void update_vdeadline(struct proc *p){
-  #define BASE_TIMESLICE 5
-  uint64 weighted_timeslice = (BASE_TIMESLICE * WEIGHT_NICE_20)/p->weight;
-  p->vdeadline = p->vruntime + weighted_timeslice;
-  p->timeslice = BASE_TIMESLICE;
-}
-//새로 추가한 함수 끝
-//
 
 uint64
 usertrap(void)
