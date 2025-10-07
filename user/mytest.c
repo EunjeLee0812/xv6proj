@@ -9,11 +9,11 @@
 // CPU를 점유하는 함수 (긴 계산 루프)
 void cpu_hog() {
     volatile int k = 0; // 최적화 방지
-    for (int i = 0; i < 500; i++) {
+    for (int i = 0; i < 50; i++) {
         for (int j = 0; j < LONG_LOOP_COUNT; j++) {
             k++;
         }
-	if(i==400) ps(0);
+	if(i==40) ps(0);
     }
 }
 
@@ -22,13 +22,12 @@ main(int argc, char *argv[])
 {
     int pid;
     // 테스트 케이스: 최우선(0), 기본(20), 최하위(39)
-    int nice_values[] = {0, 10, 20}; 
-    char *names[] = {"T_High", "T_Base", "T_Low"};
+    int nice_values[] = {0, 5, 10, 18, 25}; 
+    char *names[] = {"T_1st", "T_2nd", "T_3rd", "T_4th", "T_5th"};
     int num_processes = sizeof(nice_values) / sizeof(nice_values[0]);
     int i;
 
     printf("=== EE VDF Fairness Test START ===\n");
-    printf("Expected: T_High(nice=0) uses most CPU; T_Low(nice=39) vruntime increases fastest.\n");
 
     for (i = 0; i < num_processes; i++) {
         pid = fork();

@@ -86,7 +86,7 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2){
      //수정한 부분 시작
-    uint64 delta_runtime = 1;
+    uint64 delta_runtime = MILLITICK_UNIT;
     p->runtime += delta_runtime;
     uint64 weighted_delta_vruntime = (WEIGHT_NICE_20 * delta_runtime)/p->weight;
     p->vruntime += weighted_delta_vruntime;
