@@ -13,6 +13,7 @@ void cpu_hog() {
         for (int j = 0; j < LONG_LOOP_COUNT; j++) {
             k++;
         }
+	if(i==25) ps(0);
     }
 }
 
@@ -51,7 +52,7 @@ main(int argc, char *argv[])
             cpu_hog(); // CPU 점유 시작
 
             printf("Process %s (PID %d) finished.\n", names[i], getpid());
-            exit(0);
+	    exit(0);
         }
     }
 
@@ -59,7 +60,13 @@ main(int argc, char *argv[])
     for (i = 0; i < num_processes; i++) {
         wait(0);
     }
-
+    
+    // ==========================================================
+    // [추가된 부분] ps 시스템 콜 호출 및 결과 확인
+    // ==========================================================
+    
+    // ps 시스템 콜을 호출하여 현재 프로세스 상태(종료된 자식 프로세스의 상태)를 확인
+    // NOTE: 자식 프로세스는 ZOMBIE 상태로 남아있을 가능성이 높습니다.
     printf("=== EE VDF Fairness Test END ===\n");
     exit(0);
 }

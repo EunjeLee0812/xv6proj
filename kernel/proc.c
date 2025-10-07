@@ -460,8 +460,6 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-  struct proc *next_proc = 0;
-  uint64 min_vdeadline = (uint64)-1;
   c->proc = 0;
   for(;;){
     // The most recent process to run may have had interrupts
@@ -472,9 +470,10 @@ scheduler(void)
     uint64 min_vruntime = (uint64)-1;
     uint64 total_weight = 0;
     uint64 total_vruntime_offset_weight = 0;
+    struct proc *next_proc = 0;
+    uint64 min_vdeadline = (uint64)-1;
     intr_on();
     intr_off();
-    int found = 0;
 
     for(p=proc;p<&proc[NPROC];p++){
       acquire(&p->lock);
@@ -486,55 +485,48 @@ scheduler(void)
       }
       release(&p->lock);
     }
-
-    for(p=proc;p<&proc[NPROC];p++){
-      acquire(&p->lock);
-      if(p->state==RUNNABLE){
-        uint64 v_offset = p->vruntime - min_vruntime;
-	total_vruntime_offset_weight += v_offset * p->weight;
+    if(total_weight > 0){
+      for(p=proc;p<&proc[NPROC];p++){
+        acquire(&p->lock);
+        if(p->state==RUNNABLE){
+          uint64 v_offset = p->vruntime - min_vruntime;
+	  total_vruntime_offset_weight += v_offset * p->weight;
+        }
+        release(&p->lock);
       }
-      release(&p->lock);
     }
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-	if(p->vdeadline < min_vdeadline){
+	int is_eligible = 0;
+	if(total_weight > 0){
 	  uint64 v_offset = p->vruntime - min_vruntime;
-	  uint64 right_term = v_offset * total_weight;
-	  uint64 left_term = total_vruntime_offset_weight;
-	  int is_eligible = 0;
-	  if(total_weight > 0 && left_term >= right_term)
-	    is_eligible = 1;
-
-	  if(is_eligible){
-	    min_vdeadline = p->vdeadline;
-	    if(next_proc != 0) release(&next_proc->lock);
-	    next_proc = p;
-	  }
-	  else release(&p->lock);
+          uint64 right_term = v_offset * total_weight;
+          uint64 left_term = total_vruntime_offset_weight;
+	  if(left_term >= right_term) is_eligible = 1;
 	}
-        else release(&p->lock);
+	else if(p->weight > 0) is_eligible = 1;
+	if(is_eligible){
+          if(p->vdeadline < min_vdeadline){
+	    if(next_proc != 0) release(&next_proc->lock);
+	  next_proc = p;
+	  min_vdeadline = p->vdeadline;
+	  continue;
+	  }
+	}
       }
-      else release(&p->lock);
+      release(&p->lock);
     }
+
     if(next_proc != 0){
       next_proc->state = RUNNING;
       c->proc = next_proc;
-      found = 1;
-
       swtch(&c->context, &next_proc->context);
-
-      c->proc=0;
-      acquire(&next_proc->lock);
+      c->proc = 0;
       release(&next_proc->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
-    }
+    else asm volatile("wfi");
   }
 }
 
