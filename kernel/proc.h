@@ -94,6 +94,8 @@ struct proc {
 
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
+  
+  struct mmap_area *mmap_areas[64];
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
@@ -110,6 +112,16 @@ struct proc {
   uint64 runtime;
   uint weight;
   int timeslice;
+};
+
+struct mmap_area{
+    struct file *f;
+    uint64 addr;
+    int length;
+    int offset;
+    int prot;
+    int flags;
+    struct proc* p;
 };
 
 #define WEIGHT_NICE_20 1024
