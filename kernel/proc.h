@@ -124,6 +124,12 @@ struct mmap_area{
     struct proc* p;
 };
 
+struct{
+    struct spinlock lock;
+    struct mmap_area areas[MAX_MMAP_AREAS];
+} mmap_manager;
+
+
 #define WEIGHT_NICE_20 1024
 #define BASE_TIMESLICE 5
 #define MILLITICK_UNIT 1000

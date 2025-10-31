@@ -71,6 +71,10 @@ procinit(void)
   
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+  
+  initlock(&mmap_manager.lock, "mmap_manager");
+  memset(mmap_manager.areas, 0, sizeof(mmap_manager.areas));
+
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->state = UNUSED;
