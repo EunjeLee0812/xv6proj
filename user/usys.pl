@@ -47,3 +47,7 @@ entry("setnice");
 entry("ps");
 entry("meminfo");
 entry("waitpid");
+entry("mmap");
+entry("munmap");
+entry("freemem");
+
