@@ -1000,3 +1000,147 @@ int waitpid(int pid){
 		sleep(target_proc, &wait_lock);
 	}
 }
+
+static struct mmap_area*
+mmap_find_free_area(struct proc *p)
+{
+  for (int i = 0; i < MMAP_MAX_AREAS; i++) {
+    if (!p->mmap_areas[i].used) {
+      return &p->mmap_areas[i];
+    }
+  }
+  return 0;
+}
+
+static int
+mmap_populate(struct proc *p, struct mmap_area *ma)
+{
+  uint64 va = MMAPBASE + ma->addr;  // 실제 유저 가상주소
+  for (int off = 0; off < ma->length; off += PGSIZE) {
+    char *mem = kalloc();
+    if (!mem) {
+      // 할당 실패
+      return -1;
+    }
+    memset(mem, 0, PGSIZE);
+
+    // 파일 매핑이면 파일의 데이터를 페이지 크기만큼 읽어 채움
+    if (ma->f) {
+      // 파일의 아이노드 잠그고 읽기
+      ilock(ma->f->ip);
+      int rn = readi(ma->f->ip, mem, ma->offset + off, PGSIZE);
+      iunlock(ma->f->ip);
+      // rn 은 읽은 바이트 수: 부족하면 나머지는 0으로 둔다(이미 memset)
+      (void)rn; // 현재는 더 상세한 오류 처리 생략
+    }
+
+    // kernel virtual -> physical 변환: V2P 매크로 사용 (xv6 표준)
+    uint64 pa = V2P((char*)mem);
+
+    // 페이지테이블에 매핑 (권한은 ma->prot에 따라 설정)
+    int perm = PTE_U;
+    if (ma->prot & PROT_WRITE) perm |= PTE_W;
+    // read 권한은 xv6에서 PTE_R 비트로 표현이 따로 없으니 필요시 추가
+    // mappages는 physical address를 요구함
+    if (mappages(p->pagetable, va + off, PGSIZE, pa, perm) < 0) {
+      kfree(mem);
+      return -1;
+    }
+    // 다음 페이지로
+  }
+  return 0;
+}
+
+uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
+  struct proc *p = myproc();
+  struct file *f = 0;
+  struct mmap_area *ma = 0;
+
+  if(length <= 0) return -1;
+  if((uint64)length % PGSIZE != 0) return -1;
+  if(addr != 0 && (addr % PGSIZE) != 0) return -1;
+  if((offset % PGSIZE) != 0) return -1;
+  if(prot & ~(PROT_READ | PROT_WRITE)) return -1;
+  if(flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return -1;
+
+  acquire(&p->lock);
+  if(!(flags & MAP_ANONYMOUS)){
+    if(fd < 0 || fd >= NOFILE)
+    {
+        release(&p->lock);
+        return -1;
+    }
+    f = p->ofile[fd];
+    if(!f)
+    {
+        release(&p->lock);
+        return -1;
+    }
+    // 파일의 open mode와 prot 일치 검사 (file 구조체에 readable/writable 필드가 있으면 사용)
+    // 예: if ((prot & PROT_WRITE) && !f->writable) { release(&p->lock); return -1; }
+    // (xv6 버전에 따라 필드명이 다름. 맞춰서 사용)
+  }
+
+  // 3) mmap_area 예약 (used=1)
+  ma = mmap_find_free_area(p);
+  if(!ma)
+  {
+      release(&p->lock);
+      return -1;
+  }
+  ma->used = 1;
+  ma->f = f;
+  ma->addr = addr;       // 만약 addr==0이면 아래에서 결정
+  ma->length = length;
+  ma->offset = offset;
+  ma->prot = prot;
+  ma->flags = flags;
+  ma->p = p;
+  ma->populated = 0;
+
+  if(ma->addr == 0){
+    uint64 newaddr = PGROUNDUP(p->sz);
+    if(newaddr + length >= MMAPBASE){
+      ma->used = 0;
+      release(&p->lock);
+      return -1;
+    }
+    ma->addr = newaddr;
+    p->sz = newaddr + length; // p->sz 확장
+  }
+
+  // 예약 끝
+  release(&p->lock);
+
+  // 5) MAP_POPULATE이면 페이지 즉시 할당/매핑 수행 (긴 작업: 락 없이)
+  if (flags & MAP_POPULATE) {
+    if (mmap_populate(p, ma) < 0) {
+      // 실패 시: 슬롯 복구 (락을 잠깐 걸고)
+      acquire(&p->lock);
+      ma->used = 0;
+      release(&p->lock);
+      return -1;
+    }
+    // populate 성공 -> 상태 갱신
+    acquire(&p->lock);
+    ma->populated = 1;
+    release(&p->lock);
+  }
+
+  // 리턴값: 슬라이드대로 MMAPBASE + addr을 실제 매핑 시작 주소로 리턴
+  return (MMAPBASE + ma->addr);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
