@@ -112,6 +112,7 @@ struct proc {
   uint64 runtime;
   uint weight;
   int timeslice;
+  uint64 mmap_cursor;
 };
 
 struct mmap_area{

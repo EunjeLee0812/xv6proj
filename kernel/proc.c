@@ -169,7 +169,7 @@ found:
   p->runtime = 0;
   p->timeslice = 5;
   update_vdeadline(p);
-  
+  p->mmap_cursor = 0;  
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -213,6 +213,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->mmap_cursor = 0;
   p->state = UNUSED;
 }
 
@@ -333,7 +334,7 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
-
+  np->mmap_cursor = p->mmap_cursor;
   release(&np->lock);
 
   acquire(&wait_lock);
@@ -1080,7 +1081,11 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
     // 예: if ((prot & PROT_WRITE) && !f->writable) { release(&p->lock); return -1; }
     // (xv6 버전에 따라 필드명이 다름. 맞춰서 사용)
   }
-
+  if(addr==0){
+    uint64 cur = PGROUNDUP(p->mmap_cursor);
+    addr = cur;
+    p->mmap_cursor = addr+length;
+  }
   // 3) mmap_area 예약 (used=1)
   ma = mmap_find_free_area(p);
   if(!ma)
@@ -1088,6 +1093,8 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
       release(&p->lock);
       return -1;
   }
+
+
   ma->used = 1;
   ma->f = f;
   ma->addr = addr;       // 만약 addr==0이면 아래에서 결정
@@ -1099,14 +1106,8 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   ma->populated = 0;
 
   if(ma->addr == 0){
-    uint64 newaddr = PGROUNDUP(p->sz);
-    if(newaddr + length >= MMAPBASE){
-      ma->used = 0;
-      release(&p->lock);
-      return -1;
-    }
-    ma->addr = newaddr;
-    p->sz = newaddr + length; // p->sz 확장
+    addr = p->mmap_cursor;
+    p->mmap_cursor += length;
   }
 
   // 예약 끝
