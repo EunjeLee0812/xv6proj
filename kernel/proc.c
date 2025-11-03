@@ -1036,19 +1036,22 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
     }
 
     // kernel virtual -> physical 변환: V2P 매크로 사용 (xv6 표준)
-    uint64 pa = V2P((char*)mem);
 
     // 페이지테이블에 매핑 (권한은 ma->prot에 따라 설정)
-    int perm = PTE_U;
+    int perm = PTE_U|PTE_R;
     if (ma->prot & PROT_WRITE) perm |= PTE_W;
     // read 권한은 xv6에서 PTE_R 비트로 표현이 따로 없으니 필요시 추가
     // mappages는 physical address를 요구함
     if (mappages(p->pagetable, va + off, PGSIZE, pa, perm) < 0) {
       kfree(mem);
-      return -1;
+      goto fail;
     }
     // 다음 페이지로
   }
+  return 1;
+
+  fail:
+  if(off>0) munmap(p->pagetable, base, off/PGSIZE, 1);
   return 0;
 }
 
@@ -1057,25 +1060,25 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   struct file *f = 0;
   struct mmap_area *ma = 0;
 
-  if(length <= 0) return -1;
-  if((uint64)length % PGSIZE != 0) return -1;
-  if(addr != 0 && (addr % PGSIZE) != 0) return -1;
-  if((offset % PGSIZE) != 0) return -1;
-  if(prot & ~(PROT_READ | PROT_WRITE)) return -1;
-  if(flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return -1;
+  if(length <= 0) return 0;
+  if((uint64)length % PGSIZE != 0) return 0;
+  if(addr != 0 && (addr % PGSIZE) != 0) return 0;
+  if((offset % PGSIZE) != 0) return 0;
+  if(prot & ~(PROT_READ | PROT_WRITE)) return 0;
+  if(flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return 0;
 
   acquire(&p->lock);
   if(!(flags & MAP_ANONYMOUS)){
     if(fd < 0 || fd >= NOFILE)
     {
         release(&p->lock);
-        return -1;
+        return 0;
     }
     f = p->ofile[fd];
     if(!f)
     {
         release(&p->lock);
-        return -1;
+        return 0;
     }
     // 파일의 open mode와 prot 일치 검사 (file 구조체에 readable/writable 필드가 있으면 사용)
     // 예: if ((prot & PROT_WRITE) && !f->writable) { release(&p->lock); return -1; }
@@ -1091,7 +1094,7 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   if(!ma)
   {
       release(&p->lock);
-      return -1;
+      return 0;
   }
 
 
@@ -1105,11 +1108,6 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   ma->p = p;
   ma->populated = 0;
 
-  if(ma->addr == 0){
-    addr = p->mmap_cursor;
-    p->mmap_cursor += length;
-  }
-
   // 예약 끝
   release(&p->lock);
 
@@ -1120,13 +1118,21 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
       acquire(&p->lock);
       ma->used = 0;
       release(&p->lock);
-      return -1;
+      return 0;
     }
     // populate 성공 -> 상태 갱신
     acquire(&p->lock);
     ma->populated = 1;
     release(&p->lock);
+    else{
+      acquire(&p->lock);
+      ma->used = 0;
+      release(&p->lock);
+      if(ma->f) fileclose(ma->f);
+      return 0;
+    }
   }
+
 
   // 리턴값: 슬라이드대로 MMAPBASE + addr을 실제 매핑 시작 주소로 리턴
   return (MMAPBASE + ma->addr);
