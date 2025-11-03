@@ -1016,43 +1016,35 @@ mmap_find_free_area(struct proc *p)
 static int
 mmap_populate(struct proc *p, struct mmap_area *ma)
 {
-  uint64 va = MMAPBASE + ma->addr;  // 실제 유저 가상주소
-  for (int off = 0; off < ma->length; off += PGSIZE) {
+  uint64 base = MMAPBASE + ma->addr;
+  int off;
+
+  for (off = 0; off < ma->length; off += PGSIZE) {
     char *mem = kalloc();
-    if (!mem) {
-      // 할당 실패
-      return -1;
-    }
+    if (!mem) goto fail;
     memset(mem, 0, PGSIZE);
 
-    // 파일 매핑이면 파일의 데이터를 페이지 크기만큼 읽어 채움
     if (ma->f) {
-      // 파일의 아이노드 잠그고 읽기
       ilock(ma->f->ip);
       int rn = readi(ma->f->ip, mem, ma->offset + off, PGSIZE);
       iunlock(ma->f->ip);
-      // rn 은 읽은 바이트 수: 부족하면 나머지는 0으로 둔다(이미 memset)
-      (void)rn; // 현재는 더 상세한 오류 처리 생략
+      if (rn < 0) { kfree(mem); goto fail; }
+      // rn < PGSIZE 이면 나머지는 0으로 둔다.
     }
 
-    // kernel virtual -> physical 변환: V2P 매크로 사용 (xv6 표준)
-
-    // 페이지테이블에 매핑 (권한은 ma->prot에 따라 설정)
-    int perm = PTE_U|PTE_R;
+    int perm = PTE_U | PTE_R;
     if (ma->prot & PROT_WRITE) perm |= PTE_W;
-    // read 권한은 xv6에서 PTE_R 비트로 표현이 따로 없으니 필요시 추가
-    // mappages는 physical address를 요구함
-    if (mappages(p->pagetable, va + off, PGSIZE, pa, perm) < 0) {
+
+    if (mappages(p->pagetable, base + off, PGSIZE, (uint64)mem, perm) < 0) {
       kfree(mem);
       goto fail;
     }
-    // 다음 페이지로
   }
-  return 1;
+  return 1;                      // 성공
 
-  fail:
-  if(off>0) munmap(p->pagetable, base, off/PGSIZE, 1);
-  return 0;
+fail:
+  if (off > 0) uvmunmap(p->pagetable, base, off/PGSIZE, 1);  // 붙인 만큼 회수
+  return 0;                      // 실패
 }
 
 uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
@@ -1066,24 +1058,20 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   if((offset % PGSIZE) != 0) return 0;
   if(prot & ~(PROT_READ | PROT_WRITE)) return 0;
   if(flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return 0;
+// 인자 검사 직후
+  if (flags & MAP_ANONYMOUS) {
+    if (fd != -1 || offset != 0) return 0;
+    f = 0;
+  } else {
+    if (fd < 0 || fd >= NOFILE) return 0;
+    f = myproc()->ofile[fd];
+    if (!f) return 0;
+    if ((prot & PROT_READ)  && !f->readable) return 0;
+    if ((prot & PROT_WRITE) && !f->writable) return 0;
+    // 필요시 filedup(f);
+  }
 
   acquire(&p->lock);
-  if(!(flags & MAP_ANONYMOUS)){
-    if(fd < 0 || fd >= NOFILE)
-    {
-        release(&p->lock);
-        return 0;
-    }
-    f = p->ofile[fd];
-    if(!f)
-    {
-        release(&p->lock);
-        return 0;
-    }
-    // 파일의 open mode와 prot 일치 검사 (file 구조체에 readable/writable 필드가 있으면 사용)
-    // 예: if ((prot & PROT_WRITE) && !f->writable) { release(&p->lock); return -1; }
-    // (xv6 버전에 따라 필드명이 다름. 맞춰서 사용)
-  }
   if(addr==0){
     uint64 cur = PGROUNDUP(p->mmap_cursor);
     addr = cur;
@@ -1108,33 +1096,22 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   ma->p = p;
   ma->populated = 0;
 
-  // 예약 끝
   release(&p->lock);
 
-  // 5) MAP_POPULATE이면 페이지 즉시 할당/매핑 수행 (긴 작업: 락 없이)
-  if (flags & MAP_POPULATE) {
-    if (mmap_populate(p, ma) < 0) {
-      // 실패 시: 슬롯 복구 (락을 잠깐 걸고)
-      acquire(&p->lock);
-      ma->used = 0;
-      release(&p->lock);
-      return 0;
-    }
-    // populate 성공 -> 상태 갱신
+if (flags & MAP_POPULATE) {
+  if (mmap_populate(p, ma) == 0) {       // 실패
     acquire(&p->lock);
-    ma->populated = 1;
+    ma->used = 0;
     release(&p->lock);
-    else{
-      acquire(&p->lock);
-      ma->used = 0;
-      release(&p->lock);
-      if(ma->f) fileclose(ma->f);
-      return 0;
-    }
+    if (ma->f) fileclose(ma->f);         // dup 했다면 필수
+    return 0;
   }
+  acquire(&p->lock);
+  ma->populated = 1;
+  release(&p->lock);
+}
 
 
-  // 리턴값: 슬라이드대로 MMAPBASE + addr을 실제 매핑 시작 주소로 리턴
   return (MMAPBASE + ma->addr);
 }
 
