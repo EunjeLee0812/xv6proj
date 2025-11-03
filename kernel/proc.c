@@ -5,6 +5,9 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "file.h"
+#include "fs.h"
+
 
 #define MAX_NAME_LEN 16
 
@@ -1042,9 +1045,9 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
   }
   return 1;                      // 성공
 
-fail:
-  if (off > 0) uvmunmap(p->pagetable, base, off/PGSIZE, 1);  // 붙인 만큼 회수
-  return 0;                      // 실패
+  fail:
+    if (off > 0) uvmunmap(p->pagetable, base, off/PGSIZE, 1);  // 붙인 만큼 회수
+    return 0;                      // 실패
 }
 
 uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
@@ -1075,6 +1078,7 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   if(addr==0){
     uint64 cur = PGROUNDUP(p->mmap_cursor);
     addr = cur;
+    if (addr + length < addr) { release(&p->lock); return 0; }
     p->mmap_cursor = addr+length;
   }
   // 3) mmap_area 예약 (used=1)
@@ -1103,7 +1107,6 @@ if (flags & MAP_POPULATE) {
     acquire(&p->lock);
     ma->used = 0;
     release(&p->lock);
-    if (ma->f) fileclose(ma->f);         // dup 했다면 필수
     return 0;
   }
   acquire(&p->lock);
