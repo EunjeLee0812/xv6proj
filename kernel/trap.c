@@ -36,6 +36,7 @@ trapinithart(void)
 // return value is user satp for trampoline.S to switch to.
 //
 
+extern int handle_mmap_pgfault(struct proc *p, uint64 fault_va, int is_write);
 
 uint64
 usertrap(void)
@@ -74,6 +75,13 @@ usertrap(void)
   } else if((r_scause() == 15 || r_scause() == 13) &&
             vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
     // page fault on lazily-allocated page
+    uint64 va = r_stval();
+    int is_write = (sc == 15);
+    if(handle_mmap_pgfault(p, va, is_write) == 1){
+      return; // 복귀 시 재시도
+    }
+    // 실패: 프로세스 종료
+    setkilled(p);
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());

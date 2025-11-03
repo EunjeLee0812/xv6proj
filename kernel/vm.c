@@ -484,3 +484,72 @@ ismapped(pagetable_t pagetable, uint64 va)
   }
   return 0;
 }
+static struct mmap_area* find_mmap_area(struct proc *p, uint64 fault_va,
+                                        uint64 *page_base, uint64 *page_off)
+{
+  if(fault_va < MMAPBASE) return 0;
+  for(int i=0;i<MMAP_MAX_AREAS;i++){
+    struct mmap_area *ma = &p->mmap_areas[i];
+    if(!ma->used) continue;
+    uint64 start = MMAPBASE + ma->addr;
+    uint64 end   = start + ma->length;
+    if(fault_va >= start && fault_va < end){
+      uint64 va_page = PGROUNDDOWN(fault_va);
+      *page_base = va_page;
+      *page_off  = va_page - start; // area 내부 페이지 오프셋
+      return ma;
+    }
+  }
+  return 0;
+}
+
+int handle_mmap_pgfault(struct proc *p, uint64 fault_va, int is_write)
+{
+  uint64 vabase, off_in_area;
+  struct mmap_area *ma = find_mmap_area(p, fault_va, &vabase, &off_in_area);
+  if(!ma) return -1;
+
+  // 보호 체크
+  if(is_write && !(ma->prot & PROT_WRITE)) return -1;
+
+  // 이미 매핑된가?
+  pte_t *pte = walk(p->pagetable, vabase, 0);
+  if(pte && (*pte & PTE_V)){
+    // 보호 폴트 업그레이드만 허용(선택)
+    if(is_write && (ma->prot & PROT_WRITE)){
+      *pte |= PTE_W;
+      sfence_vma(); // 안전
+      return 1;
+    }
+    return -1;
+  }
+
+  // 페이지 할당
+  char *mem = kalloc();
+  if(!mem) return -1;
+  memset(mem, 0, PGSIZE);
+
+  // 파일 매핑이면 읽기
+  if(ma->f){
+    ilock(ma->f->ip);
+    int rn = readi(ma->f->ip, mem, ma->offset + off_in_area, PGSIZE);
+    iunlock(ma->f->ip);
+    if(rn < 0){ kfree(mem); return -1; }
+    // rn < PGSIZE면 나머지는 0패딩 그대로
+  }
+
+  int perm = PTE_U | PTE_R;
+  if(ma->prot & PROT_WRITE) perm |= PTE_W;
+
+  if(mappages(p->pagetable, vabase, PGSIZE, (uint64)mem, perm) < 0){
+    kfree(mem);
+    return -1;
+  }
+  // 필요 시 ma->populated = 1; // per-page로 쓰려면 생략
+
+  // TLB flush는 사용자 페이지테이블 갱신 후 보통 필요 없음. 호출해도 무방.
+  // sfence_vma();
+
+  return 1;
+}
+
