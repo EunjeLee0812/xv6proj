@@ -73,11 +73,9 @@ usertrap(void)
     // ok
   } else if((r_scause() == 15 || r_scause() == 13)){
       uint64 va = r_stval();
-      int is_write = (scause == 15);
+      int is_write = (r_scause == 15);
 
-      if(handle_pgfault(p, va, is_write) == 0) return;
-
-      p->killed = 1;
+      if(handle_pgfault(p, va, is_write)<0) setkilled(p);
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
