@@ -484,3 +484,104 @@ ismapped(pagetable_t pagetable, uint64 va)
   }
   return 0;
 }
+
+// ---- mmap_area 찾기: va 가 속한 영역 ----
+static struct mmap_area *
+mmap_find_area(struct proc *p, uint64 va)
+{
+  for(int i = 0; i < MMAP_MAX_AREAS; i++){
+    struct mmap_area *ma = &p->mmap_areas[i];
+    if(!ma->used) continue;
+    uint64 base = MMAPBASE + ma->addr;
+    if(base <= va && va < base + ma->length)
+      return ma;
+  }
+  return 0;
+}
+
+// ---- 익명 페이지 할당 ----
+static int
+fault_map_anon(struct proc *p, uint64 a, int perm)
+{
+  char *mem = kalloc();
+  if(!mem) return -1;
+  memset(mem, 0, PGSIZE);
+  if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) < 0){
+    kfree(mem);
+    return -1;
+  }
+  return 0;
+}
+
+// ---- mmap 영역 한 페이지 채우기 ----
+static int
+fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
+{
+  // 접근권한 체크
+  if(is_write && !(ma->prot & PROT_WRITE)) return -1;
+  if(!is_write && !(ma->prot & PROT_READ)) return -1;
+
+  uint64 base = MMAPBASE + ma->addr;
+  if(a < base || a >= base + ma->length) return -1;
+
+  int perm = PTE_U | PTE_R;
+  if(ma->prot & PROT_WRITE) perm |= PTE_W;
+#ifdef PTE_X
+  if(ma->prot & PROT_EXEC)  perm |= PTE_X;
+#endif
+
+  char *mem = kalloc();
+  if(!mem) return -1;
+  memset(mem, 0, PGSIZE);
+
+  // 파일 매핑이면 파일에서 채움. 익명이면 zero 유지.
+  if(ma->f){
+    uint off_in_area = a - base;
+    uint foff = ma->offset + off_in_area;
+    ilock(ma->f->ip);
+    int rn = readi(ma->f->ip, mem, foff, PGSIZE); // 당신 구현 시그니처에 맞춤
+    iunlock(ma->f->ip);
+    if(rn < 0){
+      kfree(mem);
+      return -1;
+    }
+    // rn < PGSIZE면 나머지는 이미 0
+  }
+
+  if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) < 0){
+    kfree(mem);
+    return -1;
+  }
+  return 0;
+}
+
+// ---- 메인: usertrap()에서 호출 ----
+int
+handle_pgfault(struct proc *p, uint64 va, int is_write)
+{
+  if(va >= MAXVA) return -1;
+  uint64 a = PGROUNDDOWN(va);
+
+  // 이미 매핑돼 있는데 권한 위반이면 실패(COW 미구현 가정)
+  pte_t *pte = walk(p->pagetable, a, 0);
+  if(pte && (*pte & PTE_V)){
+    return -1; // 예: read-only 페이지에 write
+  }
+
+  // 1) mmap 영역
+  struct mmap_area *ma = mmap_find_area(p, va);
+  if(ma){
+    return fault_map_mmap(p, ma, a, is_write);
+  }
+
+  // 2) sbrk로 커진 익명 힙([0 .. p->sz))
+  if(va < p->sz){
+    return fault_map_anon(p, a, PTE_U | PTE_R | PTE_W);
+  }
+
+  // 3) (옵션) 스택 자동확장: 가드~최대 범위 정의 후 사용
+  // if(stack_guard < va && va < p->stack_top) return fault_map_anon(p, a, PTE_U|PTE_R|PTE_W);
+
+  return -1; // 불법 접근
+}
+
