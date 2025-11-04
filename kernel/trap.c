@@ -54,8 +54,8 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
+  uint64 sc = r_scause();
+  if(sc == 8){
     // system call
 
     if(killed(p))
@@ -72,16 +72,17 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if((r_scause() == 15 || r_scause() == 13) &&
-            vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
-    uint64 va = r_stval();
-    int is_write = (sc == 15);
-    if(handle_mmap_pgfault(p, va, is_write) == 1){
-      return; // 복귀 시 재시도
-    }
-    // 실패: 프로세스 종료
-    setkilled(p);
+  } else if((sc == 15 || sc == 13)){
+      uint64 faultva = r_stval();
+      int is_write = (sc==15);
+      int handled = 0;
+
+      if(handle_mmap_pgfault(p, faultva, is_write) == 1) handled = 1;
+
+      if(!handled && vmfault(p->pagetable, badva, !is_write) != 0)
+          handled = 1;
+
+      if(!handled) setkiled(p);
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
