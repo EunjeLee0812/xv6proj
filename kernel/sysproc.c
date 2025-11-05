@@ -148,23 +148,31 @@ sys_waitpid(void)
 }
 
 uint64
-sys_mmap(void){
-	uint64 addr;
-	int length;
-    int prot;
-    int flags;
-    int fd;
-    int offset;
-    
-    if(argaddr(0, &addr) < 0 || argint(1,&length)<0 || argint(2,&prot)<0 || argint(3, &flags)<0 || argint(4, &fd)<0 || argint(5,&offset)<0) return -1;
+sys_mmap(void)
+{
+  uint64 addr;
+  int length, prot, flags, fd, offset;
 
-    return mmap(addr, length, prot, flags, fd, offset);
+  argaddr(0, &addr);
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, &offset);
+
+  if (length <= 0) return -1;
+  if (addr && (addr % PGSIZE)) return -1;
+  if (offset % PGSIZE) return -1;
+  if (prot & ~(PROT_READ | PROT_WRITE)) return -1;
+  if (flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return -1;
+
+  return mmap(addr, length, prot, flags, fd, offset);
 }
 
 uint64
 sys_munmap(void){
     uint64 addr;
-    if(argaddr(0, &addr)<0) return -1;
+    argaddr(0, &addr);
     return munmap(addr);
 }
 

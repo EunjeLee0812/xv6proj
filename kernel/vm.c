@@ -7,10 +7,13 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
  */
+struct mmap_manager mmap_manager;
+
 pagetable_t kernel_pagetable;
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
@@ -51,6 +54,12 @@ kvmmake(void)
   return kpgtbl;
 }
 
+void mmap_init(void){
+  initlock(&mmap_manager.lock, "mmap");
+  memset(mmap_manager.areas, 0, sizeof(mmap_manager.areas));
+}
+
+
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
@@ -66,6 +75,7 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
+  mmap_init();
 }
 
 // Switch the current CPU's h/w page table register to
@@ -423,6 +433,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   int got_null = 0;
   struct proc *p = myproc();
   while(got_null == 0 && max > 0){
+    if(srcva>=MAXVA) return -1;
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0) {
@@ -506,7 +517,7 @@ ismapped(pagetable_t pagetable, uint64 va)
 static struct mmap_area *
 mmap_find_area(struct proc *p, uint64 va)
 {
-  for(int i = 0; i < MMAP_MAX_AREAS; i++){
+  for(int i = 0; i < MAX_MMAP_AREAS; i++){
     struct mmap_area *ma = &p->mmap_areas[i];
     if(!ma->used) continue;
     uint64 base = MMAPBASE + ma->addr;
@@ -541,11 +552,9 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
   uint64 base = MMAPBASE + ma->addr;
   if(a < base || a >= base + ma->length) return -1;
 
-  int perm = PTE_U | PTE_R;
-  if(ma->prot & PROT_WRITE) perm |= PTE_W;
-#ifdef PTE_X
-  if(ma->prot & PROT_EXEC)  perm |= PTE_X;
-#endif
+  int perm = PTE_U;
+  if (ma->prot & PROT_READ)  perm |= PTE_R;
+  if (ma->prot & PROT_WRITE) perm |= PTE_W;
 
   char *mem = kalloc();
   if(!mem) return -1;
@@ -556,7 +565,7 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
     uint off_in_area = a - base;
     uint foff = ma->offset + off_in_area;
     ilock(ma->f->ip);
-    int rn = readi(ma->f->ip, mem, foff, PGSIZE); // 당신 구현 시그니처에 맞춤
+    int rn = readi(ma->f->ip, 0, (uint64)mem, foff, PGSIZE); // 당신 구현 시그니처에 맞춤
     iunlock(ma->f->ip);
     if(rn < 0){
       kfree(mem);
@@ -605,7 +614,7 @@ handle_pgfault(struct proc *p, uint64 va, int is_write)
 static struct mmap_area *
 mmap_find_by_base(struct proc *p, uint64 uaddr)
 {
-  for (int i = 0; i < MMAP_MAX_AREAS; i++) {
+  for (int i = 0; i < MAX_MMAP_AREAS; i++) {
     struct mmap_area *ma = &p->mmap_areas[i];
     if (!ma->used) continue;
     uint64 base = MMAPBASE + ma->addr;
@@ -645,7 +654,10 @@ munmap(uint64 uaddr)
   // 이미 fault-in 된 페이지만 해제해도 OK
   unmap_present(p->pagetable, base, len);
 
-  if (ma->f) fileclose(ma->f);             // 파일 매핑이면 참조 해제
+  if (ma->f){
+      fileclose(ma->f); 
+      ma->f=0;
+  }
   memset(ma, 0, sizeof(*ma));              // 메타 비우기
   return 1;                                // 사양: 성공 1, 실패 -1
 }
@@ -654,7 +666,7 @@ munmap(uint64 uaddr)
 static struct mmap_area*
 mmap_find_free_area(struct proc *p)
 {
-  for (int i = 0; i < MMAP_MAX_AREAS; i++) {
+  for (int i = 0; i < MAX_MMAP_AREAS; i++) {
     if (!p->mmap_areas[i].used) {
       return &p->mmap_areas[i];
     }
@@ -675,7 +687,8 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
 
     if (ma->f) {
       ilock(ma->f->ip);
-      int rn = readi(ma->f->ip, mem, ma->offset + off, PGSIZE);
+      uint foff = ma->offset + off;
+      int rn = readi(ma->f->ip, 0, (uint64)mem, foff, PGSIZE);
       iunlock(ma->f->ip);
       if (rn < 0) { kfree(mem); goto fail; }
       // rn < PGSIZE 이면 나머지는 0으로 둔다.
@@ -717,15 +730,20 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
     if (!f) return 0;
     if ((prot & PROT_READ)  && !f->readable) return 0;
     if ((prot & PROT_WRITE) && !f->writable) return 0;
-    // 필요시 filedup(f);
+    if(!f0->ip) return 0;
+    f=filedup(f0);
+  }
+  uint64 off = 0;
+  if (addr) {
+    if (addr < MMAPBASE) { if (f) fileclose(f); return 0; }
+    off = addr - MMAPBASE;
   }
 
   acquire(&p->lock);
-  if(addr==0){
-    uint64 cur = PGROUNDUP(p->mmap_cursor);
-    addr = cur;
-    if (addr + length < addr) { release(&p->lock); return 0; }
-    p->mmap_cursor = addr+length;
+  if (off == 0) {
+    off = PGROUNDUP(p->mmap_cursor);
+    if (off + length < off) { release(&p->lock); if (f) fileclose(f); return 0; }
+    p->mmap_cursor = off + length;
   }
   // 3) mmap_area 예약 (used=1)
   ma = mmap_find_free_area(p);

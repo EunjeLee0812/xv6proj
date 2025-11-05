@@ -178,7 +178,7 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, int);
-int             hadle_pgfault(struct proc*, uint64, int);
+int             handle_pgfault(struct proc*, uint64, int);
 
 // plic.c
 void            plicinit(void);

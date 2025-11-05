@@ -73,7 +73,7 @@ usertrap(void)
     // ok
   } else if((r_scause() == 15 || r_scause() == 13)){
       uint64 va = r_stval();
-      int is_write = (r_scause == 15);
+      int is_write = (r_scause() == 15);
 
       if(handle_pgfault(p, va, is_write)<0) setkilled(p);
   } else {

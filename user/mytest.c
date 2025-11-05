@@ -2,70 +2,84 @@
 #include "../kernel/stat.h"
 #include "user.h"
 #include "../kernel/fcntl.h"
+#include "../kernel/memlayout.h"
+#include "../kernel/param.h"
+#include "../kernel/spinlock.h"
+#include "../kernel/sleeplock.h"
+#include "../kernel/fs.h"
+#include "../kernel/memlayout.h"
+#include "../kernel/syscall.h"
 
-// 총 CPU 점유 시간을 늘리기 위한 반복 횟수
-#define LONG_LOOP_COUNT 50000000 
+#ifndef PGSIZE
+#define PGSIZE 4096
+#endif
 
-// CPU를 점유하는 함수 (긴 계산 루프)
-void cpu_hog() {
-    volatile int k = 0; // 최적화 방지
-    for (int i = 0; i < 50; i++) {
-        for (int j = 0; j < LONG_LOOP_COUNT; j++) {
-            k++;
-        }
-	if(i==40) ps(0);
-    }
+void show_freemem(char *msg) {
+  int n = freemem();
+  printf("%s: free pages = %d\n", msg, n);
 }
+void test_anonymous() {
+  int len = 2*PGSIZE;
+  show_freemem("Before anon mmap");
 
-void
-main(int argc, char *argv[])
-{
-    int pid;
-    // 테스트 케이스: 최우선(0), 기본(20), 최하위(39)
-    int nice_values[] = {0, 5, 10, 18, 25}; 
-    char *names[] = {"T_1st", "T_2nd", "T_3rd", "T_4th", "T_5th"};
-    int num_processes = sizeof(nice_values) / sizeof(nice_values[0]);
-    int i;
+  char *a1 = (char*)mmap(0, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
+  printf("MAP_ANONYMOUS|MAP_POPULATE addr: %p\n", a1);
+  show_freemem("After anon populate");
 
-    printf("=== EE VDF Fairness Test START ===\n");
+  munmap((uint64)a1);
+  show_freemem("After anon unmap");
 
-    for (i = 0; i < num_processes; i++) {
-        pid = fork();
+  char *a2 = (char*)mmap(0, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+  printf("MAP_ANONYMOUS (lazy) addr: %p\n", a2);
+  *a2 = 'X'; // lazy 할당 유도
+  show_freemem("After lazy page fault");
+  munmap((uint64)a2);
+  show_freemem("After lazy unmap");
+}
+void test_filemap() {
+  int fd = open("README", O_RDONLY);
+  if(fd < 0) {
+    printf("Cannot open README\n");
+    exit(1);
+  }
 
-        if (pid < 0) {
-            fprintf(2, "mytest: fork failed\n");
-            break;
-        }
+  show_freemem("Before file mmap");
+  char *f1 = (char*)mmap(0, PGSIZE, PROT_READ, MAP_POPULATE, fd, 0);
+  printf("file mmap populate: %p -> first char = %c\n", f1, f1[0]);
+  show_freemem("After file populate");
 
-        if (pid == 0) {
-            // 자식 프로세스
-            
-            // setnice 시스템 콜 호출 (이 시스템 콜이 구현되어 있어야 함)
-            if (setnice(getpid(), nice_values[i]) < 0) {
-                fprintf(2, "Test %s: setnice failed. Check setnice implementation.\n", names[i]);
-            }
-            
-            printf("Process %s (PID %d) starting with nice=%d...\n", 
-                   names[i], getpid(), nice_values[i]);
-            
-            cpu_hog(); // CPU 점유 시작
+  munmap((uint64)f1);
+  show_freemem("After file unmap");
 
-            printf("Process %s (PID %d) finished.\n", names[i], getpid());
-	    exit(0);
-        }
-    }
+  char *f2 = (char*)mmap(0, PGSIZE, PROT_READ, 0, fd, 0);
+  printf("file mmap lazy: %p -> first char = %c\n", f2, f2[0]);
+  show_freemem("After file lazy");
 
-    // 부모 프로세스는 모든 자식이 끝날 때까지 대기
-    for (i = 0; i < num_processes; i++) {
-        wait(0);
-    }
-    
-    // ==========================================================
-    // [추가된 부분] ps 시스템 콜 호출 및 결과 확인
-    // ==========================================================
-    
-    // ps 시스템 콜을 호출하여 현재 프로세스 상태(종료된 자식 프로세스의 상태)를 확인
-    // NOTE: 자식 프로세스는 ZOMBIE 상태로 남아있을 가능성이 높습니다.
-    printf("=== EE VDF Fairness Test END ===\n");
+  munmap((uint64)f2);
+  close(fd);
+}
+void test_fork() {
+  int fd = open("README", O_RDONLY);
+  char *m = (char*)mmap(0, PGSIZE, PROT_READ, MAP_POPULATE, fd, 0);
+  printf("Before fork: %c\n", m[0]);
+
+  int pid = fork();
+  if(pid == 0){
+    printf("Child sees: %c\n", m[0]);
+    munmap((uint64)m);
     exit(0);
+  } else {
+    wait(0);
+    printf("Parent still sees: %c\n", m[0]);
+    munmap((uint64)m);
+  }
+  close(fd);
 }
+int main() {
+  printf("===== mmap system call test =====\n");
+  test_anonymous();
+  test_filemap();
+  test_fork();
+  exit(0);
+}
+

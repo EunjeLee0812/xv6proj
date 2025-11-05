@@ -91,7 +91,7 @@ int freemem(void)
 {
     uint64 n;
     acquire(&kmem.lock);
-    n = kmem.nfree;
+    n = kmem.freepgn;
     release(&kmem.lock);
     return (int)n;
 }

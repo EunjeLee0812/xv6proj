@@ -1,3 +1,5 @@
+#ifndef PROC_H
+#define PROC_H
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -25,7 +27,17 @@ struct cpu {
   int noff;                   // Depth of push_off() nesting.
   int intena;                 // Were interrupts enabled before push_off()?
 };
-
+struct mmap_area{
+    struct file *f;
+    uint64 addr;
+    int length;
+    int offset;
+    int prot;
+    int flags;
+    struct proc* p;
+    int used;
+    int populated;
+};
 extern struct cpu cpus[NCPU];
 
 // per-process data for the trap handling code in trampoline.S.
@@ -95,7 +107,7 @@ struct proc {
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
   
-  struct mmap_area *mmap_areas[MMAP_MAX_AREAS];
+  struct mmap_area mmap_areas[MAX_MMAP_AREAS];
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
@@ -115,25 +127,16 @@ struct proc {
   uint64 mmap_cursor;
 };
 
-struct mmap_area{
-    struct file *f;
-    uint64 addr;
-    int length;
-    int offset;
-    int prot;
-    int flags;
-    struct proc* p;
-    int used;
-    int populated;
-};
 
-struct{
+struct mmap_manager{
     struct spinlock lock;
     struct mmap_area areas[MAX_MMAP_AREAS];
-} mmap_manager;
+};
+extern struct mmap_manager mmap_manager;
 
 
 #define WEIGHT_NICE_20 1024
 #define BASE_TIMESLICE 5
 #define MILLITICK_UNIT 1000
 #define BASE_TIMESLICE_MT (BASE_TIMESLICE*MILLITICK_UNIT)
+#endif
