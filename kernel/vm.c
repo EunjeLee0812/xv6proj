@@ -527,7 +527,7 @@ fault_map_anon(struct proc *p, uint64 a, int perm)
     kfree(mem);
     return -1;
   }
-  return 0;
+  return 1;
 }
 
 // ---- mmap 영역 한 페이지 채우기 ----
@@ -569,7 +569,7 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
     kfree(mem);
     return -1;
   }
-  return 0;
+  return 1;
 }
 
 // ---- 메인: usertrap()에서 호출 ----
