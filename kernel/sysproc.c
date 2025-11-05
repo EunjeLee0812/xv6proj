@@ -160,3 +160,10 @@ sys_mmap(void){
 
     return mmap(addr, length, prot, flags, fd, offset);
 }
+
+uint64
+sys_munmap(void){
+    uint64 addr;
+    if(argaddr(0, &addr)<0) return -1;
+    return munmap(addr);
+}

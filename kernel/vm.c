@@ -602,3 +602,50 @@ handle_pgfault(struct proc *p, uint64 va, int is_write)
   return -1; // 불법 접근
 }
 
+static struct mmap_area *
+mmap_find_by_base(struct proc *p, uint64 uaddr)
+{
+  for (int i = 0; i < MMAP_MAX_AREAS; i++) {
+    struct mmap_area *ma = &p->mmap_areas[i];
+    if (!ma->used) continue;
+    uint64 base = MMAPBASE + ma->addr;
+    if (base == uaddr) return ma;
+  }
+  return 0;
+}
+
+// 존재하는 페이지만 안전하게 언매핑 + kfree
+static void
+unmap_present(pagetable_t pt, uint64 va, uint64 len)
+{
+  for (uint64 a = va; a < va + len; a += PGSIZE) {
+    pte_t *pte = walk(pt, a, 0);
+    if (pte && (*pte & PTE_V)) {
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+      *pte = 0;
+    }
+  }
+  sfence_vma();  // TLB 동기화
+}
+
+// === 공개 함수: sys_munmap()이 이걸 호출 ===
+int
+munmap(uint64 uaddr)
+{
+  struct proc *p = myproc();
+  if (uaddr % PGSIZE) return -1;           // 페이지 정렬 요구
+
+  struct mmap_area *ma = mmap_find_by_base(p, uaddr);
+  if (!ma) return -1;                      // 시작 주소 불일치
+
+  uint64 base = MMAPBASE + ma->addr;
+  uint64 len  = ma->length;                // 이미 페이지 단위 길이여야 함
+
+  // 이미 fault-in 된 페이지만 해제해도 OK
+  unmap_present(p->pagetable, base, len);
+
+  if (ma->f) fileclose(ma->f);             // 파일 매핑이면 참조 해제
+  memset(ma, 0, sizeof(*ma));              // 메타 비우기
+  return 1;                                // 사양: 성공 1, 실패 -1
+}
