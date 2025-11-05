@@ -167,3 +167,9 @@ sys_munmap(void){
     if(argaddr(0, &addr)<0) return -1;
     return munmap(addr);
 }
+
+uint64
+sys_freemem(void)
+{
+    return freemem();
+}
