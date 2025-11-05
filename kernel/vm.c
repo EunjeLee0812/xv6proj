@@ -342,6 +342,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
+  struct proc *p = myproc();
   uint64 n, va0, pa0;
   pte_t *pte;
 
@@ -351,13 +352,17 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       return -1;
   
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
-      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+    if(pa0 == 0){
+      if(p && pagetable == p->pagetable &&
+         handle_pgfault(p, dstva, 1) == 0){
+        pa0 = walkaddr(pagetable, va0);
+        if(pa0 == 0) return -1;
+      }else{
         return -1;
       }
     }
-
     pte = walk(pagetable, va0, 0);
+    if(pte==0) return -1;
     // forbid copyout over read-only user text pages.
     if((*pte & PTE_W) == 0)
       return -1;
@@ -381,15 +386,20 @@ int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   uint64 n, va0, pa0;
-
+  struct proc *p = myproc();
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
+    if(va0 >= MAXVA) return -1;
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
-      if((pa0 = vmfault(pagetable, va0, 0)) == 0) {
+    if (pa0 == 0) {
+      if (p && pagetable == p->pagetable &&
+          handle_pgfault(p, srcva, 0) == 0) {
+        pa0 = walkaddr(pagetable, va0);
+        if (pa0 == 0) return -1;
+      } else {
         return -1;
       }
-    }
+    }    
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -411,12 +421,19 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
   uint64 n, va0, pa0;
   int got_null = 0;
-
+  struct proc *p = myproc();
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if (pa0 == 0) {
+      if (p && pagetable == p->pagetable &&
+          handle_pgfault(p, srcva, 0) == 0) {
+        pa0 = walkaddr(pagetable, va0);
+        if (pa0 == 0) return -1;
+      } else {
+        return -1;
+      }
+    }    
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
