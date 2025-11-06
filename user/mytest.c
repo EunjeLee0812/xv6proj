@@ -1,14 +1,9 @@
+// mytest.c — 대규모 페이지테이블 분기 생성/검증용
 #include "../kernel/types.h"
 #include "../kernel/stat.h"
 #include "user.h"
 #include "../kernel/fcntl.h"
 #include "../kernel/memlayout.h"
-#include "../kernel/param.h"
-#include "../kernel/spinlock.h"
-#include "../kernel/sleeplock.h"
-#include "../kernel/fs.h"
-#include "../kernel/memlayout.h"
-#include "../kernel/syscall.h"
 
 #ifndef PGSIZE
 #define PGSIZE 4096
@@ -22,121 +17,89 @@
 #define MAP_POPULATE  2
 #endif
 
-void test_prot_ro_write_fault() {
-  int fd = open("README", O_RDONLY);
-  if (fd < 0) { printf("open README fail\n"); return; }
+// 4KB(=4096) 페이지를 mmap 해보자 (총 16MiB)
+#define NPAGES     4096
+#define BYTES_TOTAL ((uint64)NPAGES * PGSIZE)
 
-  char *ro = (char*)mmap(0, PGSIZE, PROT_READ, 0, fd, 0);
-  printf("RO map @%p first=%c\n", ro, ro[0]);
+// SV39 기준: L0(leaf) 1 PTP가 2MiB(=512 * 4KiB)를 커버
+//             L1 1 PTP는 1GiB 밑의 L0 테이블들을 가리킴
+#define CHUNK_2MB  ((uint64)512 * PGSIZE)
+#define CHUNK_1GB  ((uint64)1 << 30)
 
-  int pid = fork();
-  if (pid == 0) {
-    // 여기가 죽어야 정상
-    ro[0] = 'Z';
-    printf("ERROR: write to RO succeeded\n");
-    exit(1);
-  } else {
-    int st = 0;
-    wait(&st);
-    // st==1이면 자식이 위의 ERROR 경로로 정상종료함 → 실패
-    if (st == 1) printf("FAIL: RO write not blocked\n");
-    else         printf("OK: RO write killed child (st=%d)\n", st);
-  }
-
-  munmap((uint64)ro);
-  close(fd);
-}
-void test_unmap_reclaim() {
-  int before = freemem();
-  char *a = (char*)mmap(0, 2*PGSIZE, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
-  int after_map = freemem();
-  printf("reclaim: before=%d after_map=%d delta=%d\n", before, after_map, before - after_map);
-
-  munmap((uint64)a);
-  int after_unmap = freemem();
-  printf("reclaim: after_unmap=%d recovered=%d\n", after_unmap, after_unmap - after_map);
-}
-void test_fd_close_after_mmap() {
-  int fd = open("README", O_RDONLY);
-  if (fd < 0) { printf("open README fail\n"); return; }
-  char *m = (char*)mmap(0, PGSIZE, PROT_READ, 0, fd, 0);
-  close(fd); // 바로 닫음. mmap이 filedup 해놨으면 OK
-  printf("after close: m[0]=%c\n", m[0]); // 읽히면 성공
-  munmap((uint64)m);
-}
-
-void show_freemem(char *msg) {
+static void show_free(const char *msg) {
   int n = freemem();
   printf("%s: free pages = %d\n", msg, n);
 }
-void test_anonymous() {
-  int len = 2*PGSIZE;
-  show_freemem("Before anon mmap");
 
-  char *a1 = (char*)mmap(0, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_POPULATE, -1, 0);
-  printf("MAP_ANONYMOUS|MAP_POPULATE addr: %p\n", a1);
-  show_freemem("After anon populate");
-
-  munmap((uint64)a1);
-  show_freemem("After anon unmap");
-
-  char *a2 = (char*)mmap(0, len, PROT_READ|PROT_WRITE, MAP_ANONYMOUS, -1, 0);
-  printf("MAP_ANONYMOUS (lazy) addr: %p\n", a2);
-  *a2 = 'X'; // lazy 할당 유도
-  show_freemem("After lazy page fault");
-  munmap((uint64)a2);
-  show_freemem("After lazy unmap");
+static uint64 ceil_div_u64(uint64 a, uint64 b) {
+  return (a + b - 1) / b;
 }
-void test_filemap() {
-  int fd = open("README", O_RDONLY);
-  if(fd < 0) {
-    printf("Cannot open README\n");
+
+void test_mass_pt_fanout(void) {
+  int before = freemem();
+  show_free("before mmap");
+
+  // 큰 연속 구간 할당 (익명 + populate → 실제 물리페이지 잡힘)
+  char *base = (char*)mmap(0, BYTES_TOTAL,
+                           PROT_READ | PROT_WRITE,
+                           MAP_ANONYMOUS | MAP_POPULATE,
+                           -1, 0);
+  if ((uint64)base == (uint64)-1 || base == 0) {
+    printf("mmap failed\n");
     exit(1);
   }
+  int after_map = freemem();
 
-  show_freemem("Before file mmap");
-  char *f1 = (char*)mmap(0, PGSIZE, PROT_READ, MAP_POPULATE, fd, 0);
-  printf("file mmap populate: %p -> first char = %c\n", f1, f1[0]);
-  show_freemem("After file populate");
+  printf("mapped %d pages (%d bytes) at %p\n", NPAGES, (int)BYTES_TOTAL, base);
 
-  munmap((uint64)f1);
-  show_freemem("After file unmap");
+  // 예상되는 페이지테이블 수(대략): L0 = (커버한 2MiB 블록 수), L1 = (커버한 1GiB 블록 수)
+  uint64 a = (uint64)base;
+  uint64 off2m = a % CHUNK_2MB;
+  uint64 off1g = a % CHUNK_1GB;
 
-  char *f2 = (char*)mmap(0, PGSIZE, PROT_READ, 0, fd, 0);
-  printf("file mmap lazy: %p -> first char = %c\n", f2, f2[0]);
-  show_freemem("After file lazy");
+  uint64 nb2m = ceil_div_u64(off2m + BYTES_TOTAL, CHUNK_2MB); // L0 PTP 개수 예상
+  uint64 nb1g = ceil_div_u64(off1g + BYTES_TOTAL, CHUNK_1GB); // L1 PTP 개수 예상
+  printf("expected new PT pages ~= L0:%d + L1:%d = %d  (root 제외, 대략치)\n",
+         (int)nb2m, (int)nb1g, (int)(nb2m + nb1g));
 
-  munmap((uint64)f2);
-  close(fd);
-}
-void test_fork() {
-  int fd = open("README", O_RDONLY);
-  char *m = (char*)mmap(0, PGSIZE, PROT_READ, MAP_POPULATE, fd, 0);
-  printf("Before fork: %c\n", m[0]);
-
-  int pid = fork();
-  if(pid == 0){
-    printf("Child sees: %c\n", m[0]);
-    munmap((uint64)m);
-    exit(0);
-  } else {
-    wait(0);
-    printf("Parent still sees: %c\n", m[0]);
-    munmap((uint64)m);
+  // 2MiB 블록 경계 목록을 출력(실제 여러 '분기'가 생기는 위치 가늠용)
+  printf("2MB blocks covered: %d\n", (int)nb2m);
+  for (int i = 0; i < (int)nb2m; i++) {
+    // base가 2MiB 정렬이 아닐 수 있으므로, base 기준으로 위쪽 2MiB 경계들을 나열
+    uint64 first_block = (a / CHUNK_2MB) * CHUNK_2MB;
+    uint64 addr = first_block + (uint64)i * CHUNK_2MB;
+    if (addr < a) addr += CHUNK_2MB;
+    if (addr >= a + BYTES_TOTAL) break;
+    printf("  block[%d]: %p .. %p\n", i, (void*)addr, (void*)(addr + CHUNK_2MB - 1));
   }
-  close(fd);
-}
-int main() {
-  printf("===== mmap system call test =====\n");
-  test_anonymous();
-  test_filemap();
-  test_fork();
 
-  printf("\n\n===== mmap system call test =====\n");
-  // 네가 이미 만든 기존 테스트들 호출 후 아래 3개도 호출
-  test_prot_ro_write_fault();
-  test_unmap_reclaim();
-  test_fd_close_after_mmap();
+  // 혹시 구현이 lazy일 수도 있으니 페이지마다 1바이트씩 터치
+  for (int i = 0; i < NPAGES; i++) {
+    base[i * PGSIZE] = (char)(i & 0xFF);
+  }
+  int after_touch = freemem();
+
+  int delta_map   = before - after_map;
+  int delta_touch = after_map - after_touch;
+
+  printf("deltas: map=%d pages, touch=%d pages (total drop=%d)\n",
+         delta_map, delta_touch, before - after_touch);
+  printf("note) 이상적이라면 data=%d + PT≈%d 만큼 줄어들 수 있음\n",
+         NPAGES, (int)(nb2m + nb1g));
+
+  // 해제 및 회수 확인
+  if (munmap((uint64)base) < 0) {
+    printf("munmap failed\n");
+    exit(1);
+  }
+  int after_unmap = freemem();
+  printf("after unmap: free pages = %d, recovered=%d\n",
+         after_unmap, after_unmap - after_touch);
+}
+
+int main(void) {
+  printf("===== massive pagetable fan-out test =====\n");
+  test_mass_pt_fanout();
   exit(0);
 }
 

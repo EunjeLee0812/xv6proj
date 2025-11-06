@@ -513,7 +513,6 @@ ismapped(pagetable_t pagetable, uint64 va)
   return 0;
 }
 
-// ---- mmap_area 찾기: va 가 속한 영역 ----
 static struct mmap_area *
 mmap_find_area(struct proc *p, uint64 va)
 {
@@ -527,7 +526,6 @@ mmap_find_area(struct proc *p, uint64 va)
   return 0;
 }
 
-// ---- 익명 페이지 할당 ----
 static int
 fault_map_anon(struct proc *p, uint64 a, int perm)
 {
@@ -541,11 +539,9 @@ fault_map_anon(struct proc *p, uint64 a, int perm)
   return 0;
 }
 
-// ---- mmap 영역 한 페이지 채우기 ----
 static int
 fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
 {
-  // 접근권한 체크
   if(is_write && !(ma->prot & PROT_WRITE)) return -1;
   if(!is_write && !(ma->prot & PROT_READ)) return -1;
 
@@ -559,19 +555,16 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
   char *mem = kalloc();
   if(!mem) return -1;
   memset(mem, 0, PGSIZE);
-
-  // 파일 매핑이면 파일에서 채움. 익명이면 zero 유지.
   if(ma->f){
     uint off_in_area = a - base;
     uint foff = ma->offset + off_in_area;
     ilock(ma->f->ip);
-    int rn = readi(ma->f->ip, 0, (uint64)mem, foff, PGSIZE); // 당신 구현 시그니처에 맞춤
+    int rn = readi(ma->f->ip, 0, (uint64)mem, foff, PGSIZE);
     iunlock(ma->f->ip);
     if(rn < 0){
       kfree(mem);
       return -1;
     }
-    // rn < PGSIZE면 나머지는 이미 0
   }
 
   if(mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) < 0){
@@ -581,34 +574,26 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
   return 0;
 }
 
-// ---- 메인: usertrap()에서 호출 ----
 int
 handle_pgfault(struct proc *p, uint64 va, int is_write)
 {
   if(va >= MAXVA) return -1;
   uint64 a = PGROUNDDOWN(va);
 
-  // 이미 매핑돼 있는데 권한 위반이면 실패(COW 미구현 가정)
   pte_t *pte = walk(p->pagetable, a, 0);
   if(pte && (*pte & PTE_V)){
-    return -1; // 예: read-only 페이지에 write
+    return -1;
   }
 
-  // 1) mmap 영역
   struct mmap_area *ma = mmap_find_area(p, va);
   if(ma){
     return fault_map_mmap(p, ma, a, is_write);
   }
-
-  // 2) sbrk로 커진 익명 힙([0 .. p->sz))
   if(va < p->sz){
     return fault_map_anon(p, a, PTE_U | PTE_R | PTE_W);
   }
 
-  // 3) (옵션) 스택 자동확장: 가드~최대 범위 정의 후 사용
-  // if(stack_guard < va && va < p->stack_top) return fault_map_anon(p, a, PTE_U|PTE_R|PTE_W);
-
-  return -1; // 불법 접근
+  return -1;
 }
 
 static struct mmap_area *
@@ -623,7 +608,6 @@ mmap_find_by_base(struct proc *p, uint64 uaddr)
   return 0;
 }
 
-// 존재하는 페이지만 안전하게 언매핑 + kfree
 static void
 unmap_present(pagetable_t pt, uint64 va, uint64 len)
 {
@@ -635,31 +619,27 @@ unmap_present(pagetable_t pt, uint64 va, uint64 len)
       *pte = 0;
     }
   }
-  sfence_vma();  // TLB 동기화
+  sfence_vma();
 }
 
-// === 공개 함수: sys_munmap()이 이걸 호출 ===
 int
 munmap(uint64 uaddr)
 {
   struct proc *p = myproc();
-  if (uaddr % PGSIZE) return -1;           // 페이지 정렬 요구
+  if (uaddr % PGSIZE) return -1;
 
   struct mmap_area *ma = mmap_find_by_base(p, uaddr);
-  if (!ma) return -1;                      // 시작 주소 불일치
+  if (!ma) return -1;
 
   uint64 base = MMAPBASE + ma->addr;
-  uint64 len  = ma->length;                // 이미 페이지 단위 길이여야 함
-
-  // 이미 fault-in 된 페이지만 해제해도 OK
+  uint64 len  = ma->length;
   unmap_present(p->pagetable, base, len);
-
   if (ma->f){
       fileclose(ma->f); 
       ma->f=0;
   }
-  memset(ma, 0, sizeof(*ma));              // 메타 비우기
-  return 1;                                // 사양: 성공 1, 실패 -1
+  memset(ma, 0, sizeof(*ma));
+  return 1;
 }
 
 
@@ -691,7 +671,6 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
       int rn = readi(ma->f->ip, 0, (uint64)mem, foff, PGSIZE);
       iunlock(ma->f->ip);
       if (rn < 0) { kfree(mem); goto fail; }
-      // rn < PGSIZE 이면 나머지는 0으로 둔다.
     }
     int perm = PTE_U;
     if (ma->prot & PROT_READ)  perm |= PTE_R;
@@ -703,11 +682,11 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
       goto fail;
     }
   }
-  return 1;                      // 성공
+  return 1;
 
   fail:
-    if (off > 0) uvmunmap(p->pagetable, base, off/PGSIZE, 1);  // 붙인 만큼 회수
-    return 0;                      // 실패
+    if (off > 0) uvmunmap(p->pagetable, base, off/PGSIZE, 1);
+    return 0;
 }
 
 uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
@@ -721,7 +700,6 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   if((offset % PGSIZE) != 0) return 0;
   if(prot & ~(PROT_READ | PROT_WRITE)) return 0;
   if(flags & ~(MAP_ANONYMOUS | MAP_POPULATE)) return 0;
-// 인자 검사 직후
   if (flags & MAP_ANONYMOUS) {
     if (fd != -1 || offset != 0) return 0;
     f = 0;
@@ -746,7 +724,6 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
     if (off + length < off) { release(&p->lock); if (f) fileclose(f); return 0; }
     p->mmap_cursor = off + length;
   }
-  // 3) mmap_area 예약 (used=1)
   ma = mmap_find_free_area(p);
   if(!ma)
   {
@@ -758,7 +735,7 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
 
   ma->used = 1;
   ma->f = f;
-  ma->addr = off;       // 만약 addr==0이면 아래에서 결정
+  ma->addr = off;
   ma->length = length;
   ma->offset = offset;
   ma->prot = prot;
@@ -769,7 +746,7 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   release(&p->lock);
 
 if (flags & MAP_POPULATE) {
-  if (mmap_populate(p, ma) == 0) {       // 실패
+  if (mmap_populate(p, ma) == 0) {
     acquire(&p->lock);
     ma->used = 0;
     release(&p->lock);

@@ -300,6 +300,21 @@ growproc(int n)
   return 0;
 }
 
+static void
+copy_mmap_areas(struct proc *child, struct proc *parent)
+{
+    for(int i=0;i<MAX_MMAP_AREAS;i++){
+        struct mmap_area *pm = &parent->mmap_areas[i];
+        if(!pm->used) continue;
+        struct mmap_area *cm = &child->mmap_areas[i];
+        *cm = *pm;
+        if(cm->f){
+            filedup(cm->f);
+        }
+    }
+    child->mmap_cursor = parent->mmap_cursor;
+}
+
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int
@@ -336,8 +351,9 @@ kfork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  copy_mmap_areas(np, p);
+
   pid = np->pid;
-  np->mmap_cursor = p->mmap_cursor;
   release(&np->lock);
 
   acquire(&wait_lock);
