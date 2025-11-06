@@ -538,7 +538,7 @@ fault_map_anon(struct proc *p, uint64 a, int perm)
     kfree(mem);
     return -1;
   }
-  return 1;
+  return 0;
 }
 
 // ---- mmap 영역 한 페이지 채우기 ----
@@ -578,7 +578,7 @@ fault_map_mmap(struct proc *p, struct mmap_area *ma, uint64 a, int is_write)
     kfree(mem);
     return -1;
   }
-  return 1;
+  return 0;
 }
 
 // ---- 메인: usertrap()에서 호출 ----
@@ -693,9 +693,10 @@ mmap_populate(struct proc *p, struct mmap_area *ma)
       if (rn < 0) { kfree(mem); goto fail; }
       // rn < PGSIZE 이면 나머지는 0으로 둔다.
     }
-
-    int perm = PTE_U | PTE_R;
+    int perm = PTE_U;
+    if (ma->prot & PROT_READ)  perm |= PTE_R;
     if (ma->prot & PROT_WRITE) perm |= PTE_W;
+
 
     if (mappages(p->pagetable, base + off, PGSIZE, (uint64)mem, perm) < 0) {
       kfree(mem);
@@ -726,21 +727,21 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
     f = 0;
   } else {
     if (fd < 0 || fd >= NOFILE) return 0;
-    f = myproc()->ofile[fd];
-    if (!f) return 0;
-    if ((prot & PROT_READ)  && !f->readable) return 0;
-    if ((prot & PROT_WRITE) && !f->writable) return 0;
+    struct file *f0 = myproc()->ofile[fd];
+    if (!f0) return 0;
+    if ((prot & PROT_READ)  && !f0->readable) return 0;
+    if ((prot & PROT_WRITE) && !f0->writable) return 0;
     if(!f0->ip) return 0;
     f=filedup(f0);
   }
-  uint64 off = 0;
+  uint64 off = 0, want = addr;
   if (addr) {
     if (addr < MMAPBASE) { if (f) fileclose(f); return 0; }
     off = addr - MMAPBASE;
   }
 
   acquire(&p->lock);
-  if (off == 0) {
+  if (want == 0) {
     off = PGROUNDUP(p->mmap_cursor);
     if (off + length < off) { release(&p->lock); if (f) fileclose(f); return 0; }
     p->mmap_cursor = off + length;
@@ -750,13 +751,14 @@ uint64 mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
   if(!ma)
   {
       release(&p->lock);
+      if(f) fileclose(f);
       return 0;
   }
 
 
   ma->used = 1;
   ma->f = f;
-  ma->addr = addr;       // 만약 addr==0이면 아래에서 결정
+  ma->addr = off;       // 만약 addr==0이면 아래에서 결정
   ma->length = length;
   ma->offset = offset;
   ma->prot = prot;
